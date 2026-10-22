@@ -22,7 +22,12 @@ jobs:
         run: dotnet build AirWave.sln -c Release
 
       - name: Unit checks (crypto, pairing, ALAC, Windows AAC decoder)
-        run: dotnet run --project src/AirWave.TestCli -c Release --no-build -- unit
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\selftest"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          dotnet run --project src/AirWave.TestCli -c Release --no-build -- unit 2>&1 | Tee-Object -FilePath "$dir\unit.txt"
+          if ($LASTEXITCODE -ne 0) { throw "Unit checks failed" }
 
       - name: Publish (single file, no .NET install needed)
         run: >
