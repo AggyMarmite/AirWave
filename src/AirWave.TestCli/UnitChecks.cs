@@ -157,14 +157,6 @@ static class UnitChecks
                 perFrameErr.Add(fs > 0 ? 10 * Math.Log10(fs / Math.Max(1e-9, fe)) : 99);
             }
             double snrGain = 10 * Math.Log10(sig / Math.Max(1e-9, e2 / Math.Max(1, c2)));
-            for (int ch = 0; ch < 2; ch++)
-            {
-                double se = 0, ss = 0, sg = 0;
-                for (int i = 20000 + ch; i < nCmp - 6000; i += 2) { double d = gotS[i] - refS[i]; se += d * d; ss += (double)refS[i] * refS[i]; sg += (double)gotS[i] * gotS[i]; }
-                Console.WriteLine($"     channel {ch}: SNR {10 * Math.Log10(ss / Math.Max(1e-9, se)):0} dB, level ours/ref {Math.Sqrt(sg / Math.Max(1e-9, ss)):0.000}");
-            }
-            if (OperatingSystem.IsWindows()) Console.WriteLine($"     decoder output: {AirWave.Core.Audio.MediaFoundationAacDecoder.OutputFormat}");
-            Console.WriteLine($"     samples: ours {string.Join(",", gotS.Skip(40000).Take(8))} ref {string.Join(",", refS.Skip(40000).Take(8))}");
             Console.WriteLine($"     gain vs reference {gain:0.000}, SNR after gain {snrGain:0} dB, per-frame SNR: {string.Join(" ", perFrameErr.Take(16).Select(x => x.ToString("0")))}");
             if (snr <= 30 && bestLag == 0 && snrGain > 30) snr = snrGain; // level difference only
             Check($"AAC output lines up with the reference decoder (lag {bestLag} frames, SNR {snr:0} dB)", bestLag == 0 && snr > 30);
