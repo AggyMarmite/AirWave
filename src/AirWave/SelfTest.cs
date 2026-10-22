@@ -1,0 +1,103 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using AirWave.Core;
+using AirWave.Core.Audio.Windows;
+using AirWave.Core.Discovery;
+
+namespace AirWave;
+
+/// <summary>
+/// "--self-test &lt;folder&gt;": opens the app, fills it with sample speakers in every state, visits each
+/// page and saves screenshots, checks the sound capture and engine start up, then writes result.txt.
+/// Used by the build on GitHub so the app is seen working on a real Windows machine.
+/// </summary>
+internal static class SelfTest
+{
+    public static async Task RunAsync(App app, string dir)
+    {
+        var notes = new List<string>();
+        bool ok = true;
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "started.txt"), DateTime.Now.ToString("O"));
+            var w = app.Window;
+            w.Left = 80; w.Top = 60;
+            await Task.Delay(1500);
+            Snap(w, Path.Combine(dir, "01-empty.png"));
+
+            app.Controller.AddDemoSpeakers();
+            await Task.Delay(900);
+            Snap(w, Path.Combine(dir, "02-speakers.png"));
+
+            w.ShowAddPanel(true);
+            await Task.Delay(400);
+            Snap(w, Path.Combine(dir, "03-add-speaker.png"));
+            w.ShowAddPanel(false);
+
+            w.ShowSettings(true);
+            await Task.Delay(500);
+            Snap(w, Path.Combine(dir, "04-settings.png"));
+            w.ShowSettings(false);
+
+            // Sound devices and loopback capture (runners may have no sound card: that's reported, not failed)
+            try
+            {
+                var outs = WindowsAudio.ListOutputs();
+                notes.Add($"outputs: {outs.Count} ({string.Join(", ", outs.Select(o => o.Name))})");
+                if (outs.Count > 0)
+                {
+                    var cap = new LoopbackSource();
+                    cap.Start();
+                    await Task.Delay(1500);
+                    var buf = new short[352 * 2];
+                    cap.Read(buf, 352);
+                    notes.Add($"capture: {(cap.LastError == null ? "running on " + cap.CurrentDeviceName : "error " + cap.LastError)}");
+                    cap.Stop();
+                }
+            }
+            catch (Exception ex) { notes.Add("audio: " + ex.Message); }
+
+            // Discovery and engine sockets came up
+            notes.Add($"mDNS speakers seen: {app.Controller.Speakers.Count(s => !s.Id.StartsWith("demo"))}");
+
+            // Bigger window, to check the layout stretches nicely
+            w.Width = 560; w.Height = 820;
+            await Task.Delay(500);
+            Snap(w, Path.Combine(dir, "05-wide.png"));
+        }
+        catch (Exception ex)
+        {
+            ok = false;
+            File.WriteAllText(Path.Combine(dir, "crash.txt"), ex.ToString());
+        }
+
+        var errors = Log.Snapshot().Where(l => l.Contains("[E]")).ToList();
+        if (errors.Count > 0) { ok = false; notes.Add("errors in log:\n" + string.Join("\n", errors)); }
+        File.WriteAllText(Path.Combine(dir, "result.txt"), string.Join("\n", notes) + "\n" + (ok ? "PASSED" : "FAILED"));
+        File.WriteAllLines(Path.Combine(dir, "log.txt"), Log.Snapshot());
+        app.Quit();
+    }
+
+    private static void Snap(Window w, string path)
+    {
+        w.UpdateLayout();
+        var root = (FrameworkElement)w.Content;
+        int width = (int)Math.Ceiling(root.ActualWidth), height = (int)Math.Ceiling(root.ActualHeight);
+        if (width <= 0 || height <= 0) return;
+        var rtb = new RenderTargetBitmap(width * 2, height * 2, 192, 192, PixelFormats.Pbgra32);
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            dc.DrawRectangle((Brush)w.Background, null, new Rect(0, 0, width, height));
+            dc.DrawRectangle(new VisualBrush(root), null, new Rect(0, 0, width, height));
+        }
+        rtb.Render(dv);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(rtb));
+        using var fs = File.Create(path);
+        enc.Save(fs);
+    }
+}

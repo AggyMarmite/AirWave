@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        run: dotnet build AirWave.sln -c Release
+
+      - name: Publish (single file, no .NET install needed)
+        run: >
+          dotnet publish src/AirWave/AirWave.csproj -c Release -r win-x64
+          --self-contained true -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish
+
+      - name: Self-test (opens the app, screenshots every page)
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\selftest"
+          $p = Start-Process publish\AirWave.exe -ArgumentList "--self-test", $dir -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "Self-test timed out" }
+          Get-Content "$dir\result.txt"
+          if (-not (Select-String -Path "$dir\result.txt" -Pattern "PASSED" -Quiet)) {
+            if (Test-Path "$dir\crash.txt") { Get-Content "$dir\crash.txt" }
+            throw "Self-test failed"
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: self-test
+          path: ${{ runner.temp }}\selftest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirWave-win-x64
+          path: publish\AirWave.exe
