@@ -7,6 +7,7 @@ using AirWave.Core;
 using AirWave.Core.Audio;
 using AirWave.Core.Audio.Windows;
 using AirWave.Core.Discovery;
+using AirWave.Core.Receiver;
 using AirWave.Core.Streaming;
 using Microsoft.Win32;
 
@@ -31,6 +32,12 @@ public sealed class AppController : Observable, IAsyncDisposable
     private string _statusLine = "Looking for speakers…";
     private DeviceChoice _selectedDevice;
     private bool _searching = true;
+
+    // AirPlay to this PC
+    private AirPlayReceiver _receiver;
+    private RenderOutput _render;
+    private RelaySource _relay;
+    private string _receiverClient;
 
     public AppSettings Settings { get; }
     public ObservableCollection<SpeakerViewModel> Speakers { get; } = new();
@@ -60,11 +67,16 @@ public sealed class AppController : Observable, IAsyncDisposable
         EventsChannelHook.Attach();
 
         _meter = new DispatcherTimer(DispatcherPriority.Render, ui) { Interval = TimeSpan.FromMilliseconds(50) };
-        _meter.Tick += (_, _) => Level = _engine.IsStreaming ? _capture.Level : 0;
+        _meter.Tick += (_, _) =>
+        {
+            Level = _engine.IsStreaming ? _engine.Source?.Level ?? 0 : 0;
+            ReceiverLevel = _receiver?.Player.Level ?? 0;
+        };
     }
 
     public void Start()
     {
+        StartReceiver();
         RefreshDevices();
         foreach (var m in Settings.ManualSpeakers) AddManualSpeaker(m, save: false);
         _browser.Start();
@@ -216,8 +228,17 @@ public sealed class AppController : Observable, IAsyncDisposable
 
     // ------------------------------------------------------------------ discovery
 
+    /// <summary>Set once this PC's own AirPlay receiver has been seen on the network (self-test check).</summary>
+    internal bool SawOwnReceiver { get; private set; }
+
     private void OnFound(SpeakerInfo info)
     {
+        // Don't offer this PC's own receiver as a speaker (it would play the PC to itself)
+        if (_receiver != null && string.Equals(info.Id, _receiver.Identity.DeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            SawOwnReceiver = true;
+            return;
+        }
         var vm = Speakers.FirstOrDefault(s => s.Id == info.Id)
                  ?? Speakers.FirstOrDefault(s => s.Info.Txt.ContainsKey("__manual") && info.Addresses.Contains(s.Info.PreferredAddress));
         if (vm != null)
@@ -401,6 +422,7 @@ public sealed class AppController : Observable, IAsyncDisposable
         else
             StatusLine = "Pick the speakers to play your PC's sound on";
         Raise(nameof(IsStreaming));
+        Raise(nameof(ReceiverSubtitle));
     }
 
     // ------------------------------------------------------------------ PC mute
@@ -418,6 +440,132 @@ public sealed class AppController : Observable, IAsyncDisposable
         if (_pcWasMuted == false) WindowsAudio.SetMute(_mutedDeviceId, false);
         _pcWasMuted = null;
     }
+
+    // ------------------------------------------------------------------ AirPlay to this PC
+
+    public string ReceiverDefaultName => Environment.MachineName;
+
+    public bool ReceiverEnabled
+    {
+        get => Settings.ReceiverEnabled;
+        set
+        {
+            if (Settings.ReceiverEnabled == value) return;
+            Settings.ReceiverEnabled = value;
+            Settings.Save();
+            if (value) StartReceiver(); else _ = StopReceiverAsync();
+            Raise(); Raise(nameof(ReceiverHint));
+        }
+    }
+
+    public string ReceiverName
+    {
+        get => string.IsNullOrWhiteSpace(Settings.ReceiverName) ? ReceiverDefaultName : Settings.ReceiverName;
+        set
+        {
+            var v = (value ?? "").Trim();
+            Settings.ReceiverName = v.Length == 0 || v == ReceiverDefaultName ? null : v;
+            SaveSoon();
+            if (_receiver != null) _receiver.Name = ReceiverName;
+            Raise(); Raise(nameof(ReceiverHint));
+        }
+    }
+
+    public bool ReceiverPlaysOnSpeakers
+    {
+        get => Settings.ReceiverPlaysOnSpeakers;
+        set
+        {
+            if (Settings.ReceiverPlaysOnSpeakers == value) return;
+            Settings.ReceiverPlaysOnSpeakers = value;
+            Settings.Save();
+            ApplyReceiverOutput();
+            Raise(); Raise(nameof(ReceiverPlaysOnPc)); Raise(nameof(ReceiverSubtitle));
+        }
+    }
+
+    public bool ReceiverPlaysOnPc
+    {
+        get => !ReceiverPlaysOnSpeakers;
+        set => ReceiverPlaysOnSpeakers = !value;
+    }
+
+    public int ReceiverOutputIndex
+    {
+        get => ReceiverPlaysOnSpeakers ? 1 : 0;
+        set { ReceiverPlaysOnSpeakers = value == 1; Raise(); }
+    }
+
+    public bool ReceiverActive => _receiverClient != null;
+    public string ReceiverTitle => _receiverClient == null ? "" : $"Playing from {_receiverClient}";
+    public string ReceiverSubtitle => !ReceiverPlaysOnSpeakers
+        ? "On this PC's speakers"
+        : Speakers.Any(s => s.IsOn) ? "Passing it on to your speakers below" : "Switch on a speaker below to hear it";
+    public string ReceiverHint => ReceiverEnabled
+        ? $"Shows up as “{ReceiverName}” in AirPlay on your iPhone, iPad and Mac."
+        : "Turned off: this PC won't show up as an AirPlay speaker.";
+
+    private double _receiverLevel;
+    public double ReceiverLevel { get => _receiverLevel; private set => Set(ref _receiverLevel, value); }
+
+    private void StartReceiver()
+    {
+        if (_receiver != null || !Settings.ReceiverEnabled) return;
+        try
+        {
+            var id = ReceiverIdentity.LoadOrCreate(AppSettings.Folder);
+            _receiver = new AirPlayReceiver(id, _engine.Ptp, ReceiverName);
+            _receiver.StateChanged += () => _ui.InvokeAsync(OnReceiverState);
+            _receiver.Start();
+            _relay = new RelaySource(_receiver.Player);
+            _render = new RenderOutput(_receiver.Player) { DeviceId = Settings.CaptureDeviceId };
+            if (_engine.Ptp == null || !_engine.Ptp.IsRunning)
+                Log.Warn("AirPlay to this PC: PTP ports are busy, so iPhones may not be able to play to this PC");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"AirPlay to this PC couldn't start: {ex.Message}");
+            _receiver = null;
+        }
+    }
+
+    private async Task StopReceiverAsync()
+    {
+        var r = _receiver;
+        _receiver = null;
+        _render?.Stop();
+        _render = null;
+        if (_engine.Source == _relay) _engine.Source = _capture;
+        _relay = null;
+        if (r != null) await r.DisposeAsync();
+        _receiverClient = null;
+        RaiseReceiver();
+    }
+
+    private void OnReceiverState()
+    {
+        if (_receiver == null) return;
+        _receiverClient = _receiver.ActiveClient;
+        ApplyReceiverOutput();
+        RaiseReceiver();
+    }
+
+    private void ApplyReceiverOutput()
+    {
+        bool active = _receiverClient != null;
+        // This PC's speakers: only keep an output open while something is playing (an open stream can stop the PC sleeping)
+        if (active && !ReceiverPlaysOnSpeakers) _render?.Start(); else _render?.Stop();
+        // Speakers: received audio replaces the PC's sound for whichever speakers are switched on
+        var wanted = active && ReceiverPlaysOnSpeakers ? (IAudioSource)_relay : _capture;
+        if (wanted != null && !ReferenceEquals(_engine.Source, wanted)) _engine.Source = wanted;
+    }
+
+    private void RaiseReceiver()
+    {
+        Raise(nameof(ReceiverActive)); Raise(nameof(ReceiverTitle)); Raise(nameof(ReceiverSubtitle));
+    }
+
+    public void DisconnectReceiver() => _receiver?.Disconnect();
 
     // ------------------------------------------------------------------ self-test
 
@@ -446,6 +594,9 @@ public sealed class AppController : Observable, IAsyncDisposable
         StatusLine = $"Playing on 2 speakers · 1 connecting · {Settings.DelayMs / 1000.0:0.0} s delay";
         Raise(nameof(IsStreaming));
         Level = 0.35;
+        _receiverClient = "Sam's iPhone";
+        ReceiverLevel = 0.5;
+        RaiseReceiver();
         _meter.Stop();
     }
 
@@ -465,6 +616,7 @@ public sealed class AppController : Observable, IAsyncDisposable
         _meter.Stop();
         Settings.Save();
         RestorePcMute();
+        try { await StopReceiverAsync(); } catch { }
         try { await _engine.DisposeAsync(); } catch { }
         _browser.Dispose();
     }

@@ -18,6 +18,11 @@ public sealed class AppSettings
     public List<ManualSpeaker> ManualSpeakers { get; set; } = new();
     public bool ForceNtp { get; set; }
 
+    // AirPlay to this PC
+    public bool ReceiverEnabled { get; set; } = true;
+    public string ReceiverName { get; set; }             // null = the PC's name
+    public bool ReceiverPlaysOnSpeakers { get; set; }    // false = this PC's own output
+
     public sealed class ManualSpeaker
     {
         public string Name { get; set; }

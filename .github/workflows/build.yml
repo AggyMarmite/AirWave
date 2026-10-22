@@ -21,6 +21,9 @@ jobs:
       - name: Build
         run: dotnet build AirWave.sln -c Release
 
+      - name: Unit checks (crypto, pairing, ALAC, Windows AAC decoder)
+        run: dotnet run --project src/AirWave.TestCli -c Release --no-build -- unit
+
       - name: Publish (single file, no .NET install needed)
         run: >
           dotnet publish src/AirWave/AirWave.csproj -c Release -r win-x64

@@ -68,6 +68,11 @@ internal static class SelfTest
             // Discovery and engine sockets came up
             notes.Add($"mDNS speakers seen: {app.Controller.Speakers.Count(s => !s.Id.StartsWith("demo"))}");
 
+            // AirPlay to this PC: advertised through Windows and visible on the network
+            for (int i = 0; i < 20 && !app.Controller.SawOwnReceiver; i++) await Task.Delay(500);
+            notes.Add($"own AirPlay receiver advertised and discovered: {app.Controller.SawOwnReceiver}");
+            if (!app.Controller.SawOwnReceiver) { ok = false; notes.Add("this PC's AirPlay receiver wasn't discoverable"); }
+
             // Bigger window, to check the layout stretches nicely
             w.Width = 560; w.Height = 820;
             await Task.Delay(500);

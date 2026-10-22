@@ -137,4 +137,12 @@ public partial class MainWindow : Window
         }
         catch { }
     }
+
+    private void DisconnectReceiver_Click(object sender, RoutedEventArgs e) => _app.DisconnectReceiver();
+
+    private void ReceiverName_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter)
+            ReceiverNameBox.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)?.UpdateSource();
+    }
 }

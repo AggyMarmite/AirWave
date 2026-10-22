@@ -105,6 +105,7 @@
                 <RowDefinition Height="46"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -159,8 +160,40 @@
                 </StackPanel>
             </Border>
 
+            <!-- AirPlay coming in from a phone/Mac -->
+            <Border Grid.Row="2" Margin="16,-6,16,16" CornerRadius="14" Background="{StaticResource SurfaceBrush}"
+                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Padding="14,12"
+                    Visibility="{Binding ReceiverActive, Converter={StaticResource Vis}}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Width="40" Height="40" CornerRadius="20" Background="#1A2DD4BF" VerticalAlignment="Center">
+                        <TextBlock Text="&#xE8EA;" Style="{StaticResource Icon}" FontSize="18" Foreground="{StaticResource AccentBrush}"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ReceiverTitle}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding ReceiverSubtitle}" Style="{StaticResource Muted}" Margin="0,2,0,6"/>
+                        <Grid Height="4">
+                            <Border CornerRadius="2" Background="#22FFFFFF"/>
+                            <Border CornerRadius="2" Background="{StaticResource AccentGradient}" RenderTransformOrigin="0,0.5">
+                                <Border.RenderTransform>
+                                    <ScaleTransform ScaleX="{Binding ReceiverLevel, Converter={StaticResource LevelScale}, ConverterParameter=1}"/>
+                                </Border.RenderTransform>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                    <Button Grid.Column="2" Style="{StaticResource GhostButton}" VerticalAlignment="Center" ToolTip="Disconnect"
+                            Click="DisconnectReceiver_Click" Padding="10,6">
+                        <TextBlock Text="Disconnect" FontSize="12.5"/>
+                    </Button>
+                </Grid>
+            </Border>
+
             <!-- Speakers header -->
-            <Grid Grid.Row="2" Margin="20,0,12,8">
+            <Grid Grid.Row="3" Margin="20,0,12,8">
                 <TextBlock Text="SPEAKERS" Style="{StaticResource Section}" VerticalAlignment="Center"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Style="{StaticResource IconButton}" Content="&#xE710;" ToolTip="Add a speaker by its IP address" Click="AddByIp_Click"/>
@@ -169,12 +202,12 @@
             </Grid>
 
             <!-- Speaker list -->
-            <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <ItemsControl ItemsSource="{Binding Speakers}" ItemTemplate="{StaticResource SpeakerTemplate}" Margin="0,0,0,6"/>
             </ScrollViewer>
 
             <!-- Empty state -->
-            <StackPanel Grid.Row="3" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="32,0,32,40"
+            <StackPanel Grid.Row="4" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="32,0,32,40"
                         Visibility="{Binding ShowEmpty, Converter={StaticResource Vis}}">
                 <Grid Width="56" Height="56" HorizontalAlignment="Center">
                     <Ellipse Stroke="{StaticResource Surface3Brush}" StrokeThickness="3"/>
@@ -201,7 +234,7 @@
             </StackPanel>
 
             <!-- Master volume -->
-            <Border Grid.Row="4" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Background="{StaticResource SurfaceBrush}" Padding="20,14">
+            <Border Grid.Row="5" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Background="{StaticResource SurfaceBrush}" Padding="20,14">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -276,6 +309,31 @@
                             <Slider Minimum="1" Maximum="3" SmallChange="0.1" LargeChange="0.5" Margin="0,10,0,6" Value="{Binding DelaySeconds, Mode=TwoWay}"
                                     IsSnapToTickEnabled="True" TickFrequency="0.1"/>
                             <TextBlock Style="{StaticResource Muted}" Text="How far ahead the sound is sent. AirPlay speakers always play a little behind the PC; a longer delay copes better with weak Wi-Fi, a shorter one feels more responsive. 2.0 s is what Apple devices use."/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="AIRPLAY TO THIS PC" Style="{StaticResource Section}" Margin="4,18,0,8"/>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ReceiverEnabled, Mode=TwoWay}">
+                                <StackPanel>
+                                    <TextBlock Text="Let iPhones, iPads and Macs play to this PC" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" Text="{Binding ReceiverHint}"/>
+                                </StackPanel>
+                            </CheckBox>
+                            <StackPanel IsEnabled="{Binding ReceiverEnabled}">
+                                <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
+                                <TextBlock Text="Name" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <TextBox x:Name="ReceiverNameBox" Text="{Binding ReceiverName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" KeyDown="ReceiverName_KeyDown"/>
+                                <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
+                                <TextBlock Text="Play it on" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <ComboBox SelectedIndex="{Binding ReceiverOutputIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="This PC's speakers or headphones"/>
+                                    <ComboBoxItem Content="My AirPlay speakers (the ones switched on)"/>
+                                </ComboBox>
+                                <TextBlock Style="{StaticResource Muted}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                           Text="Passing it on to AirPlay speakers adds a short extra delay, so it won't line up with video on the phone."/>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
