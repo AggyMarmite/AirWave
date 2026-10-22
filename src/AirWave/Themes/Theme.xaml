@@ -81,9 +81,6 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
-                        <Grid.RenderTransform>
-                            <ScaleTransform x:Name="Squeeze"/>
-                        </Grid.RenderTransform>
                         <Border Background="{TemplateBinding Background}" CornerRadius="8"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"/>
                         <Border x:Name="Hover" Background="{StaticResource HoverBrush}" CornerRadius="8" Opacity="0"/>
@@ -102,8 +99,9 @@
                             </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Squeeze" Property="ScaleX" Value="0.97"/>
-                            <Setter TargetName="Squeeze" Property="ScaleY" Value="0.97"/>
+                            <Setter TargetName="Root" Property="RenderTransform">
+                                <Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Root" Property="Opacity" Value="0.45"/>
