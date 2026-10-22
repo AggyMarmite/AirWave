@@ -34,6 +34,16 @@ public sealed class ChannelCipher : IDisposable
         new(Derive(sharedSecret, "Events-Salt", "Events-Read-Encryption-Key"),
             Derive(sharedSecret, "Events-Salt", "Events-Write-Encryption-Key"));
 
+    /// <summary>Control channel as seen by a receiver (the keys are the other way round).</summary>
+    public static ChannelCipher ForControlServer(byte[] sharedSecret) =>
+        new(Derive(sharedSecret, "Control-Salt", "Control-Read-Encryption-Key"),
+            Derive(sharedSecret, "Control-Salt", "Control-Write-Encryption-Key"));
+
+    /// <summary>Events channel as seen by a receiver.</summary>
+    public static ChannelCipher ForEventsServer(byte[] sharedSecret) =>
+        new(Derive(sharedSecret, "Events-Salt", "Events-Write-Encryption-Key"),
+            Derive(sharedSecret, "Events-Salt", "Events-Read-Encryption-Key"));
+
     public static byte[] Derive(byte[] ikm, string salt, string info) =>
         HKDF.DeriveKey(HashAlgorithmName.SHA512, ikm, 32, Encoding.ASCII.GetBytes(salt), Encoding.ASCII.GetBytes(info));
 

@@ -11,7 +11,7 @@ namespace AirWave.Core.Crypto;
 /// </summary>
 public sealed class Srp6aClient
 {
-    private static readonly BigInteger N = BigInteger.Parse("0" +
+    internal static readonly BigInteger N = BigInteger.Parse("0" +
         "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B" +
         "139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485" +
         "B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1F" +
@@ -23,8 +23,8 @@ public sealed class Srp6aClient
         "1E8C94E04A25619DCEE3D2261AD2EE6BF12FFA06D98A0864D87602733EC86A64521F2B1817" +
         "7B200CBBE117577A615D6C770988C0BAD946E208E24FA074E5AB3143DB5BFCE0FD108E4B82" +
         "D120A93AD2CAFFFFFFFFFFFFFFFF", System.Globalization.NumberStyles.HexNumber);
-    private static readonly BigInteger G = 5;
-    private const int NLen = 384;
+    internal static readonly BigInteger G = 5;
+    internal const int NLen = 384;
 
     private readonly string _user;
     private readonly byte[] _pass;
@@ -77,14 +77,14 @@ public sealed class Srp6aClient
     public bool VerifyServerProof(byte[] m2) =>
         m2 != null && _expectedM2 != null && CryptographicOperations.FixedTimeEquals(m2, _expectedM2);
 
-    private static byte[] H(params byte[][] parts)
+    internal static byte[] H(params byte[][] parts)
     {
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA512);
         foreach (var p in parts) sha.AppendData(p);
         return sha.GetHashAndReset();
     }
 
-    private static byte[] Pad(byte[] v)
+    internal static byte[] Pad(byte[] v)
     {
         if (v.Length >= NLen) return v;
         var r = new byte[NLen];

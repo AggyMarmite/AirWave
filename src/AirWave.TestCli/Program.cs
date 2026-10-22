@@ -10,6 +10,10 @@ using AirWave.Core.Streaming;
 Log.Written += (_, line) => Console.WriteLine(line);
 if (args.Contains("--debug")) Log.MinLevel = LogLevel.Debug;
 
+if (args.Length > 0 && args[0] == "receive") { Environment.ExitCode = await ReceiveCommand.Run(args); return; }
+if (args.Length > 0 && args[0] == "send-buffered") { Environment.ExitCode = await SendBufferedCommand.Run(args); return; }
+if (args.Length > 0 && args[0] == "unit") { Environment.ExitCode = UnitChecks.Run(); return; }
+
 if (args.Length == 0 || args[0] == "discover")
 {
     int secs = args.Length > 1 && int.TryParse(args[1], out var s) ? s : 8;

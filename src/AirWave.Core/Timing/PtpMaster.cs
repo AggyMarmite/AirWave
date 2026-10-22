@@ -26,6 +26,9 @@ public sealed class PtpMaster : IDisposable
     private ushort _announceSeq, _signalingSeq, _syncSeq;
 
     public ulong ClockId { get; }
+
+    /// <summary>PTP messages from other clocks (e.g. an iPhone that is streaming to us), with our receive time.</summary>
+    public event Action<byte[], long, IPAddress> ForeignMessage;
     public bool IsRunning { get; }
     public string Error { get; }
 
@@ -126,7 +129,10 @@ public sealed class PtpMaster : IDisposable
                     SendTo(_general, from.Address, GeneralPort, MakePdelay(0x0A, msg, MonoClock.NowNs));
                     break;
                 default:
-                    // Announce/Sync/Follow_Up/Signaling from speakers: we stay master, nothing to do.
+                    // Announce/Sync/Follow_Up/Signaling from other clocks: we stay master for our own
+                    // speakers, but the receiver may be following this clock.
+                    if (BinaryPrimitives.ReadUInt64BigEndian(msg.AsSpan(20)) != ClockId)
+                        ForeignMessage?.Invoke(msg, rxNs, from.Address);
                     break;
             }
         }
