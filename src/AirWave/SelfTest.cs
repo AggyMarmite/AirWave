@@ -60,6 +60,11 @@ internal static class SelfTest
             }
             catch (Exception ex) { notes.Add("audio: " + ex.Message); }
 
+            // Sound-source dropdown
+            var combo = FindChild<System.Windows.Controls.ComboBox>(w);
+            notes.Add($"source list: {combo?.Items.Count} items, selected '{combo?.SelectedItem}', box '{combo?.SelectionBoxItem}', vm '{app.Controller.SelectedDevice}'");
+            if (combo == null || combo.SelectedItem == null) { ok = false; notes.Add("sound source dropdown is empty"); }
+
             // Discovery and engine sockets came up
             notes.Add($"mDNS speakers seen: {app.Controller.Speakers.Count(s => !s.Id.StartsWith("demo"))}");
 
@@ -79,6 +84,18 @@ internal static class SelfTest
         File.WriteAllText(Path.Combine(dir, "result.txt"), string.Join("\n", notes) + "\n" + (ok ? "PASSED" : "FAILED"));
         File.WriteAllLines(Path.Combine(dir, "log.txt"), Log.Snapshot());
         app.Quit();
+    }
+
+    private static T FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var c = VisualTreeHelper.GetChild(root, i);
+            if (c is T t) return t;
+            var r = FindChild<T>(c);
+            if (r != null) return r;
+        }
+        return null;
     }
 
     private static void Snap(Window w, string path)
