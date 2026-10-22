@@ -78,6 +78,24 @@ public sealed class MediaFoundationAacDecoder : IAacDecoder
     public static IEnumerable<string> Probe()
     {
         if (Interlocked.Exchange(ref _mfStarted, 1) == 0) Mf.Check(Mf.MFStartup(0x00020070, 0), "MFStartup");
+        {
+            var clsid0 = Mf.CLSID_CMSAACDecMFT;
+            var iid0 = typeof(IMFTransform).GUID;
+            Mf.CoCreateInstance(ref clsid0, IntPtr.Zero, 1, ref iid0, out var o0);
+            var m0 = (IMFTransform)o0;
+            for (uint i = 0; i < 8; i++)
+            {
+                int hr0 = m0.GetInputAvailableType(0, i, out var at);
+                if (hr0 != 0) { yield return $"available input {i}: {hr0:X8}"; break; }
+                at.GetGUID(Mf.MF_MT_SUBTYPE, out var sub);
+                at.GetGUID(Mf.MF_MT_MAJOR_TYPE, out var maj);
+                int h1 = at.GetUINT32(Mf.MF_MT_AAC_PAYLOAD_TYPE, out uint pt);
+                int h2 = at.GetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, out uint sr);
+                yield return $"available input {i}: major {maj} sub {sub} payload {(h1 == 0 ? pt.ToString() : "-")} rate {(h2 == 0 ? sr.ToString() : "-")}";
+                Marshal.ReleaseComObject(at);
+            }
+            Marshal.ReleaseComObject(m0);
+        }
         foreach (var payload in new uint[] { 0, 1 })
         foreach (var withBits in new[] { true, false })
         foreach (var withProfile in new[] { true, false })
@@ -350,7 +368,7 @@ internal interface IMFTransform
     void GetStreamLimits(); void GetStreamCount(); void GetStreamIDs(); void GetInputStreamInfo();
     [PreserveSig] int GetOutputStreamInfo(uint stream, out MftOutputStreamInfo info);
     void GetAttributes(); void GetInputStreamAttributes(); void GetOutputStreamAttributes(); void DeleteInputStream(); void AddInputStreams();
-    void GetInputAvailableType();
+    [PreserveSig] int GetInputAvailableType(uint stream, uint index, out IMFMediaType type);
     [PreserveSig] int GetOutputAvailableType(uint stream, uint index, out IMFMediaType type);
     [PreserveSig] int SetInputType(uint stream, IMFMediaType type, uint flags);
     [PreserveSig] int SetOutputType(uint stream, IMFMediaType type, uint flags);
