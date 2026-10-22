@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -37,6 +40,23 @@ jobs:
             if (Test-Path "$dir\crash.txt") { Get-Content "$dir\crash.txt" }
             throw "Self-test failed"
           }
+
+      - name: Save screenshots to the 'screenshots' branch
+        if: always() && github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\selftest"
+          if (-not (Test-Path $dir)) { exit 0 }
+          $ws = "$env:RUNNER_TEMP\shots"
+          New-Item -ItemType Directory $ws | Out-Null
+          Copy-Item "$dir\*" $ws
+          Set-Location $ws
+          git init -q -b screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Screenshots from ${{ github.sha }}"
+          git push -f -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screenshots
 
       - uses: actions/upload-artifact@v4
         if: always()
