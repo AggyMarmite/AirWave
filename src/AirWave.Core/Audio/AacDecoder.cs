@@ -89,9 +89,13 @@ internal sealed class MediaFoundationAacDecoder : IAacDecoder
         input.SetUINT32(Mf.MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
         input.SetUINT32(Mf.MF_MT_AAC_PAYLOAD_TYPE, 1); // ADTS
         input.SetUINT32(Mf.MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29);
-        var user = new byte[12];
+        // HEAACWAVEINFO after its WAVEFORMATEX (12 bytes), then the AudioSpecificConfig for AAC-LC
+        int freqIdx = _rate == 48000 ? 3 : 4;
+        var user = new byte[14];
         user[0] = 1;      // wPayloadType = ADTS
-        user[2] = 0x29;   // profile/level
+        user[2] = 0x29;   // wAudioProfileLevelIndication
+        user[12] = (byte)((2 << 3) | (freqIdx >> 1));             // object type 2 (LC), frequency index
+        user[13] = (byte)(((freqIdx & 1) << 7) | (_channels << 3)); // channel configuration
         input.SetBlob(Mf.MF_MT_USER_DATA, user, (uint)user.Length);
         Mf.Check(_mft.SetInputType(0, input, 0), "AAC input type");
         Marshal.ReleaseComObject(input);
