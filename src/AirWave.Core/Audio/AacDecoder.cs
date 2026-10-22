@@ -74,6 +74,17 @@ public sealed class MediaFoundationAacDecoder : IAacDecoder
         Create();
     }
 
+    /// <summary>HEAACWAVEINFO after its WAVEFORMATEX (12 bytes) for ADTS, then the AudioSpecificConfig for AAC-LC.</summary>
+    private byte[] UserData()
+    {
+        int freqIdx = _rate == 48000 ? 3 : 4;
+        var user = new byte[14];
+        user[0] = 1;      // wPayloadType = ADTS
+        user[12] = (byte)((2 << 3) | (freqIdx >> 1));
+        user[13] = (byte)(((freqIdx & 1) << 7) | (_channels << 3));
+        return user;
+    }
+
     /// <summary>Diagnostics: which input type descriptions the system decoder accepts.</summary>
     public static IEnumerable<string> Probe()
     {
@@ -138,24 +149,24 @@ public sealed class MediaFoundationAacDecoder : IAacDecoder
         Mf.Check(Mf.CoCreateInstance(ref clsid, IntPtr.Zero, 1 /* CLSCTX_INPROC_SERVER */, ref iid, out var obj), "create AAC decoder");
         _mft = (IMFTransform)obj;
 
-        Mf.Check(Mf.MFCreateMediaType(out var input), "MFCreateMediaType");
-        input.SetGUID(Mf.MF_MT_MAJOR_TYPE, Mf.MFMediaType_Audio);
-        input.SetGUID(Mf.MF_MT_SUBTYPE, Mf.MFAudioFormat_AAC);
-        input.SetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, (uint)_rate);
-        input.SetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, (uint)_channels);
-        input.SetUINT32(Mf.MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-        input.SetUINT32(Mf.MF_MT_AAC_PAYLOAD_TYPE, 1); // ADTS
-        input.SetUINT32(Mf.MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29);
-        // HEAACWAVEINFO after its WAVEFORMATEX (12 bytes), then the AudioSpecificConfig for AAC-LC
-        int freqIdx = _rate == 48000 ? 3 : 4;
-        var user = new byte[14];
-        user[0] = 1;      // wPayloadType = ADTS
-        user[2] = 0x29;   // wAudioProfileLevelIndication
-        user[12] = (byte)((2 << 3) | (freqIdx >> 1));             // object type 2 (LC), frequency index
-        user[13] = (byte)(((freqIdx & 1) << 7) | (_channels << 3)); // channel configuration
-        input.SetBlob(Mf.MF_MT_USER_DATA, user, (uint)user.Length);
-        Mf.Check(_mft.SetInputType(0, input, 0), "AAC input type");
-        Marshal.ReleaseComObject(input);
+        // Start from the ADTS AAC input type the decoder itself offers, and fill in our stream's details
+        // (building the type from scratch is rejected on some Windows versions).
+        int setHr = -1;
+        for (uint i = 0; i < 16 && setHr != 0; i++)
+        {
+            if (_mft.GetInputAvailableType(0, i, out var input) != 0) break;
+            input.GetGUID(Mf.MF_MT_SUBTYPE, out var sub);
+            bool adts = input.GetUINT32(Mf.MF_MT_AAC_PAYLOAD_TYPE, out uint pt) == 0 && pt == 1;
+            if (sub == Mf.MFAudioFormat_AAC && adts)
+            {
+                input.SetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, (uint)_rate);
+                input.SetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, (uint)_channels);
+                input.SetBlob(Mf.MF_MT_USER_DATA, UserData(), 14);
+                setHr = _mft.SetInputType(0, input, 0);
+            }
+            Marshal.ReleaseComObject(input);
+        }
+        Mf.Check(setHr, "AAC input type");
 
         // Pick the 16-bit PCM output type it offers
         for (uint i = 0; ; i++)
