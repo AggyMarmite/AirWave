@@ -54,7 +54,7 @@ public static class AacDecoder
 // =====================================================================================================
 
 [SupportedOSPlatform("windows")]
-internal sealed class MediaFoundationAacDecoder : IAacDecoder
+public sealed class MediaFoundationAacDecoder : IAacDecoder
 {
     private readonly int _rate, _channels;
     private readonly Queue<(uint rtp, uint seq)> _pending = new();
@@ -62,6 +62,8 @@ internal sealed class MediaFoundationAacDecoder : IAacDecoder
     private IMFTransform _mft;
     private bool _providesSamples;
     private int _outBufSize;
+    private int _outChannels = 2;
+    public static string OutputFormat { get; private set; }
     private static int _mfStarted;
 
     public event Action<uint, uint, short[], int> Decoded;
@@ -109,6 +111,10 @@ internal sealed class MediaFoundationAacDecoder : IAacDecoder
             t.GetUINT32(Mf.MF_MT_AUDIO_BITS_PER_SAMPLE, out uint bits);
             if (sub == Mf.MFAudioFormat_PCM && bits == 16)
             {
+                t.GetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, out uint och);
+                t.GetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, out uint orate);
+                _outChannels = (int)och;
+                OutputFormat = $"{orate} Hz, {och} ch, {bits}-bit";
                 Mf.Check(_mft.SetOutputType(0, t, 0), "AAC output type");
                 Marshal.ReleaseComObject(t);
                 break;
@@ -176,8 +182,8 @@ internal sealed class MediaFoundationAacDecoder : IAacDecoder
                 var s = (IMFSample)Marshal.GetObjectForIUnknown(odb.pSample);
                 s.ConvertToContiguousBuffer(out var cb);
                 cb.Lock(out IntPtr p, out _, out uint len);
-                int frames = (int)len / (2 * _channels);
-                var raw = new short[frames * _channels];
+                int frames = (int)len / (2 * _outChannels);
+                var raw = new short[frames * _outChannels];
                 Marshal.Copy(p, raw, 0, raw.Length);
                 cb.Unlock();
                 Marshal.ReleaseComObject(cb);
@@ -196,9 +202,9 @@ internal sealed class MediaFoundationAacDecoder : IAacDecoder
 
     private short[] ToStereo(short[] raw, int frames)
     {
-        if (_channels == 2) return raw;
+        if (_outChannels == 2) return raw;
         var st = new short[frames * 2];
-        for (int i = 0; i < frames; i++) { st[2 * i] = raw[i * _channels]; st[2 * i + 1] = raw[i * _channels + Math.Min(1, _channels - 1)]; }
+        for (int i = 0; i < frames; i++) { st[2 * i] = raw[i * _outChannels]; st[2 * i + 1] = raw[i * _outChannels + Math.Min(1, _outChannels - 1)]; }
         return st;
     }
 
