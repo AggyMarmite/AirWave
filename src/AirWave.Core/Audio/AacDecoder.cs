@@ -107,6 +107,21 @@ public sealed class MediaFoundationAacDecoder : IAacDecoder
             }
             Marshal.ReleaseComObject(m0);
         }
+        foreach (var step in new[] { "as offered", "+rate", "+rate+ch", "+rate+ch+user", "+user only" })
+        {
+            var clsid1 = Mf.CLSID_CMSAACDecMFT;
+            var iid1 = typeof(IMFTransform).GUID;
+            Mf.CoCreateInstance(ref clsid1, IntPtr.Zero, 1, ref iid1, out var o1);
+            var m1 = (IMFTransform)o1;
+            m1.GetInputAvailableType(0, 2, out var at);
+            if (step.Contains("rate")) at.SetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100);
+            if (step.Contains("ch")) at.SetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, 2);
+            if (step.Contains("user")) at.SetBlob(Mf.MF_MT_USER_DATA, new byte[] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x12, 0x10 }, 14);
+            at.GetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, out uint chn);
+            yield return $"offered type 2 {step} (channels attr {chn}): {m1.SetInputType(0, at, 0):X8}";
+            Marshal.ReleaseComObject(at);
+            Marshal.ReleaseComObject(m1);
+        }
         foreach (var payload in new uint[] { 0, 1 })
         foreach (var withBits in new[] { true, false })
         foreach (var withProfile in new[] { true, false })
