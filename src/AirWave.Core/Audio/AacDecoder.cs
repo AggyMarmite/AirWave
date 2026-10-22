@@ -54,7 +54,7 @@ public static class AacDecoder
 // =====================================================================================================
 
 [SupportedOSPlatform("windows")]
-public sealed class MediaFoundationAacDecoder : IAacDecoder
+internal sealed class MediaFoundationAacDecoder : IAacDecoder
 {
     private readonly int _rate, _channels;
     private readonly Queue<(uint rtp, uint seq)> _pending = new();
@@ -72,89 +72,6 @@ public sealed class MediaFoundationAacDecoder : IAacDecoder
         if (Interlocked.Exchange(ref _mfStarted, 1) == 0)
             Mf.Check(Mf.MFStartup(0x00020070, 0), "MFStartup");
         Create();
-    }
-
-    /// <summary>HEAACWAVEINFO after its WAVEFORMATEX (12 bytes) for ADTS, then the AudioSpecificConfig for AAC-LC.</summary>
-    private byte[] UserData()
-    {
-        int freqIdx = _rate == 48000 ? 3 : 4;
-        var user = new byte[14];
-        user[0] = 1;      // wPayloadType = ADTS
-        user[12] = (byte)((2 << 3) | (freqIdx >> 1));
-        user[13] = (byte)(((freqIdx & 1) << 7) | (_channels << 3));
-        return user;
-    }
-
-    /// <summary>Diagnostics: which input type descriptions the system decoder accepts.</summary>
-    public static IEnumerable<string> Probe()
-    {
-        if (Interlocked.Exchange(ref _mfStarted, 1) == 0) Mf.Check(Mf.MFStartup(0x00020070, 0), "MFStartup");
-        {
-            var clsid0 = Mf.CLSID_CMSAACDecMFT;
-            var iid0 = typeof(IMFTransform).GUID;
-            Mf.CoCreateInstance(ref clsid0, IntPtr.Zero, 1, ref iid0, out var o0);
-            var m0 = (IMFTransform)o0;
-            for (uint i = 0; i < 8; i++)
-            {
-                int hr0 = m0.GetInputAvailableType(0, i, out var at);
-                if (hr0 != 0) { yield return $"available input {i}: {hr0:X8}"; break; }
-                at.GetGUID(Mf.MF_MT_SUBTYPE, out var sub);
-                at.GetGUID(Mf.MF_MT_MAJOR_TYPE, out var maj);
-                int h1 = at.GetUINT32(Mf.MF_MT_AAC_PAYLOAD_TYPE, out uint pt);
-                int h2 = at.GetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, out uint sr);
-                yield return $"available input {i}: major {maj} sub {sub} payload {(h1 == 0 ? pt.ToString() : "-")} rate {(h2 == 0 ? sr.ToString() : "-")}";
-                Marshal.ReleaseComObject(at);
-            }
-            Marshal.ReleaseComObject(m0);
-        }
-        foreach (var step in new[] { "as offered", "+rate", "+rate+ch", "+rate+ch+user", "+user only" })
-        {
-            var clsid1 = Mf.CLSID_CMSAACDecMFT;
-            var iid1 = typeof(IMFTransform).GUID;
-            Mf.CoCreateInstance(ref clsid1, IntPtr.Zero, 1, ref iid1, out var o1);
-            var m1 = (IMFTransform)o1;
-            m1.GetInputAvailableType(0, 2, out var at);
-            if (step.Contains("rate")) at.SetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100);
-            if (step.Contains("ch")) at.SetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, 2);
-            if (step.Contains("user")) at.SetBlob(Mf.MF_MT_USER_DATA, new byte[] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x12, 0x10 }, 14);
-            at.GetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, out uint chn);
-            yield return $"offered type 2 {step} (channels attr {chn}): {m1.SetInputType(0, at, 0):X8}";
-            Marshal.ReleaseComObject(at);
-            Marshal.ReleaseComObject(m1);
-        }
-        foreach (var payload in new uint[] { 0, 1 })
-        foreach (var withBits in new[] { true, false })
-        foreach (var withProfile in new[] { true, false })
-        foreach (var userKind in new[] { "12+asc", "12", "none" })
-        {
-            var clsid = Mf.CLSID_CMSAACDecMFT;
-            var iid = typeof(IMFTransform).GUID;
-            int hr = Mf.CoCreateInstance(ref clsid, IntPtr.Zero, 1, ref iid, out var obj);
-            if (hr != 0) { yield return $"create {hr:X8}"; yield break; }
-            var mft = (IMFTransform)obj;
-            Mf.MFCreateMediaType(out var t);
-            var sets = new List<int>
-            {
-                t.SetGUID(Mf.MF_MT_MAJOR_TYPE, Mf.MFMediaType_Audio),
-                t.SetGUID(Mf.MF_MT_SUBTYPE, Mf.MFAudioFormat_AAC),
-                t.SetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100),
-                t.SetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, 2),
-                t.SetUINT32(Mf.MF_MT_AAC_PAYLOAD_TYPE, payload),
-            };
-            if (withBits) sets.Add(t.SetUINT32(Mf.MF_MT_AUDIO_BITS_PER_SAMPLE, 16));
-            if (withProfile) sets.Add(t.SetUINT32(Mf.MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29));
-            if (userKind != "none")
-            {
-                var u = new byte[userKind == "12" ? 12 : 14];
-                u[0] = (byte)payload; u[2] = 0x29;
-                if (u.Length == 14) { u[12] = 0x12; u[13] = 0x10; }
-                sets.Add(t.SetBlob(Mf.MF_MT_USER_DATA, u, (uint)u.Length));
-            }
-            int r = mft.SetInputType(0, t, 0);
-            yield return $"payload {payload} bits {withBits} profile {withProfile} user {userKind}: sets [{string.Join(",", sets.Select(x => x.ToString("X")))}] -> {r:X8}";
-            Marshal.ReleaseComObject(t);
-            Marshal.ReleaseComObject(mft);
-        }
     }
 
     private void Create()
@@ -176,7 +93,7 @@ public sealed class MediaFoundationAacDecoder : IAacDecoder
             {
                 input.SetUINT32(Mf.MF_MT_AUDIO_SAMPLES_PER_SECOND, (uint)_rate);
                 input.SetUINT32(Mf.MF_MT_AUDIO_NUM_CHANNELS, (uint)_channels);
-                input.SetBlob(Mf.MF_MT_USER_DATA, UserData(), 14);
+                // (ADTS frames describe themselves; adding our own config data here makes the decoder refuse the type)
                 setHr = _mft.SetInputType(0, input, 0);
             }
             Marshal.ReleaseComObject(input);

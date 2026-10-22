@@ -109,8 +109,6 @@ static class UnitChecks
             var aacRef = File.ReadAllBytes(Path.Combine(codecDir, "aac_ref.raw"));
             var got = new List<short>();
             int frames = 0;
-            if (OperatingSystem.IsWindows())
-                foreach (var line in AirWave.Core.Audio.MediaFoundationAacDecoder.Probe()) Console.WriteLine("probe " + line);
             using (var dec = AirWave.Core.Audio.AacDecoder.Create())
             {
                 var order = new List<uint>();
