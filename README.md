@@ -47,7 +47,8 @@ If a speaker doesn't appear, use **Add a speaker** and type its IP address.
 
 ## Coming next
 
-AirWave as an AirPlay **receiver** – so iPhones, iPads and Macs can play to your PC, and from there on to your speakers.
+- **AirPlay receiver** – iPhones, iPads and Macs can play to your PC, and from there on to your speakers.
+- **Screen mirroring to Apple TV** – show your Windows desktop on the TV.
 
 ## Building from source
 
