@@ -8,6 +8,12 @@ Play your Windows PC's sound on AirPlay 2 speakers – one speaker or several at
 - **Speaker buttons work** – tapping play/pause or skip on a speaker controls whatever is playing on the PC.
 - **Light** – sits in the notification area by the clock, no background services, no account, no ads.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AggyMarmite/AirWave/screenshots/02-speakers.png" width="300" alt="Speakers">
+  &nbsp;
+  <img src="https://raw.githubusercontent.com/AggyMarmite/AirWave/screenshots/04-settings.png" width="300" alt="Settings">
+</p>
+
 Works with HomePod and HomePod mini, AirPlay 2 Sonos speakers, Apple TV and other AirPlay 2 receivers.
 
 ## Install
