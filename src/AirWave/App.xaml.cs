@@ -63,6 +63,7 @@ public partial class App : Application
         if (selfTestDir != null)
         {
             Window.Show();
+            Controller.Start();
             _ = SelfTest.RunAsync(this, selfTestDir);
             return;
         }
