@@ -15,6 +15,7 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; }
     public bool StartMinimised { get; set; }
     public bool CloseToTray { get; set; } = true;
+    public bool AutoCheckUpdates { get; set; } = true;
     public List<ManualSpeaker> ManualSpeakers { get; set; } = new();
     public bool ForceNtp { get; set; }
 

@@ -1,3 +1,4 @@
+using AirWave.Core.Updates;
 using System.Collections.ObjectModel;
 using System.Net;
 using System.Runtime.InteropServices;
@@ -46,6 +47,7 @@ public sealed class AppController : Observable, IAsyncDisposable
     public ObservableCollection<ScreenViewModel> Screens { get; } = new();
     public ObservableCollection<DeviceChoice> Devices { get; } = new();
     public string Version { get; } = typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    public static System.Version AppVersion => Updater.TryVersion(typeof(AppController).Assembly.GetName().Version?.ToString(3), out var v) ? v : new System.Version(0, 0, 0);
 
     public AppController(Dispatcher ui)
     {
@@ -85,6 +87,7 @@ public sealed class AppController : Observable, IAsyncDisposable
         _browser.Start();
         _meter.Start();
         _ = StopSearchingLaterAsync();
+        StartUpdateChecks();
         if (_engine.Ptp != null && !_engine.Ptp.IsRunning)
             Log.Warn(_engine.Ptp.Error);
     }
@@ -820,9 +823,147 @@ public sealed class AppController : Observable, IAsyncDisposable
         _ = Task.Delay(600, token).ContinueWith(t => { if (!t.IsCanceled) Settings.Save(); }, TaskScheduler.Default);
     }
 
+    // ------------------------------------------------------------------ updates
+
+    private DispatcherTimer _updateTimer;
+    private UpdateInfo _update;
+    private bool _updateDismissed, _updateBusy, _checking;
+    private double _updateProgress;
+    private string _updateCheckText;
+    private CancellationTokenSource _updateCts;
+
+    /// <summary>Asks the app to close so the update can be put in place.</summary>
+    public event Action QuitForUpdate;
+
+    public bool AutoCheckUpdates
+    {
+        get => Settings.AutoCheckUpdates;
+        set { Settings.AutoCheckUpdates = value; Settings.Save(); Raise(); if (value) _ = CheckForUpdatesAsync(false); }
+    }
+
+    public bool UpdateAvailable => _update != null;
+    public bool ShowUpdateBanner => _update != null && (!_updateDismissed || _updateBusy);
+    public bool UpdateBusy { get => _updateBusy; private set { if (Set(ref _updateBusy, value)) { Raise(nameof(ShowUpdateBanner)); Raise(nameof(UpdateNotBusy)); } } }
+    public bool UpdateNotBusy => !_updateBusy;
+    public double UpdateProgress { get => _updateProgress; private set => Set(ref _updateProgress, value); }
+    public string UpdateTitle => _update == null ? "" : $"AirWave {_update.Version.ToString(3)} is available";
+    private string _updateSubtitle = "";
+    public string UpdateSubtitle { get => _updateSubtitle; private set => Set(ref _updateSubtitle, value); }
+    public string UpdateCheckText { get => _updateCheckText ?? $"You have version {Version}."; private set => Set(ref _updateCheckText, value); }
+    public bool Checking { get => _checking; private set { if (Set(ref _checking, value)) Raise(nameof(NotChecking)); } }
+    public bool NotChecking => !_checking;
+    public string UpdatePageUrl => _update?.PageUrl ?? $"https://github.com/{Updater.Repo}/releases";
+
+    private void StartUpdateChecks()
+    {
+        try { Updater.CleanUp(Environment.ProcessPath); } catch { }
+        _updateTimer = new DispatcherTimer(DispatcherPriority.Background, _ui) { Interval = TimeSpan.FromHours(6) };
+        _updateTimer.Tick += (_, _) => { if (Settings.AutoCheckUpdates) _ = CheckForUpdatesAsync(false); };
+        _updateTimer.Start();
+        if (Settings.AutoCheckUpdates)
+            _ = Task.Delay(TimeSpan.FromSeconds(15)).ContinueWith(_ => _ui.InvokeAsync(() => CheckForUpdatesAsync(false)));
+    }
+
+    public async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_checking || _updateBusy) return;
+        Checking = true;
+        if (manual) UpdateCheckText = "Checking…";
+        try
+        {
+            var info = await Task.Run(() => Updater.CheckAsync(AppVersion));
+            if (info != null)
+            {
+                bool isNew = _update == null || info.Version != _update.Version;
+                _update = info;
+                if (isNew || manual) _updateDismissed = false;
+                UpdateSubtitle = "Restarts AirWave in a few seconds. Anything playing stops briefly.";
+                UpdateCheckText = $"Version {info.Version.ToString(3)} is available (you have {Version}).";
+                Log.Info($"Update available: {info.Version}");
+            }
+            else UpdateCheckText = $"You're up to date (version {Version}).";
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Update check failed: {ex.Message}");
+            if (manual) UpdateCheckText = "Couldn't check for updates – are you online?";
+        }
+        finally
+        {
+            Checking = false;
+            RaiseUpdate();
+        }
+    }
+
+    public void DismissUpdate() { _updateDismissed = true; RaiseUpdate(); }
+
+    public async Task InstallUpdateAsync()
+    {
+        var info = _update;
+        if (info == null || _updateBusy) return;
+        string exe = Environment.ProcessPath;
+        var asset = Updater.AssetFor(info, exe);
+        if (asset == null || (!Updater.IsInstalled(exe) && asset == info.Portable && !Updater.CanReplace(exe)))
+        {
+            // Nothing we can swap in here (e.g. a portable copy in a protected folder): open the download page
+            OpenUrl(info.PageUrl);
+            return;
+        }
+        UpdateBusy = true;
+        _updateDismissed = false;
+        UpdateProgress = 0;
+        UpdateSubtitle = "Downloading…";
+        _updateCts = new CancellationTokenSource();
+        try
+        {
+            var progress = new Progress<double>(p => { UpdateProgress = p; UpdateSubtitle = $"Downloading… {p:P0}"; });
+            string file = await Updater.DownloadAsync(asset, progress, _updateCts.Token);
+            UpdateSubtitle = "Restarting AirWave…";
+            await ApplyUpdateFileAsync(file);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Update failed: {ex.Message}");
+            UpdateSubtitle = _updateCts.IsCancellationRequested ? "Update cancelled." : $"Couldn't update ({ex.Message}). Try again, or download it from GitHub.";
+            UpdateBusy = false;
+        }
+    }
+
+    public void CancelUpdate() => _updateCts?.Cancel();
+
+    /// <summary>Puts an already-downloaded update file in place (closes and restarts AirWave).</summary>
+    public async Task ApplyUpdateFileAsync(string file)
+    {
+        Updater.ScheduleInstall(file, Environment.ProcessPath, Environment.ProcessId);
+        await Task.Delay(200);
+        QuitForUpdate?.Invoke();
+    }
+
+    private void RaiseUpdate()
+    {
+        Raise(nameof(UpdateAvailable)); Raise(nameof(ShowUpdateBanner)); Raise(nameof(UpdateTitle)); Raise(nameof(UpdatePageUrl));
+    }
+
+    /// <summary>For the self-test: shows the banner as if a newer version were out.</summary>
+    public void ShowDemoUpdate()
+    {
+        _update = new UpdateInfo { Version = new System.Version(9, 9, 0), Tag = "v9.9.0", PageUrl = $"https://github.com/{Updater.Repo}/releases" };
+        _updateDismissed = false;
+        UpdateSubtitle = "Restarts AirWave in a few seconds. Anything playing stops briefly.";
+        RaiseUpdate();
+    }
+
+    public void HideDemoUpdate() { _update = null; RaiseUpdate(); }
+
+    public static void OpenUrl(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _meter.Stop();
+        _updateTimer?.Stop();
         Settings.Save();
         RestorePcMute();
         try { await StopReceiverAsync(); } catch { }

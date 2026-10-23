@@ -50,6 +50,7 @@ With the graphics card encoder on (the default), the screen is captured and enco
 | Delay | How far ahead sound is sent (default 2 s, like Apple devices). Longer copes better with weak Wi-Fi |
 | Reconnect my speakers when AirWave opens | Turns your last speakers back on at launch |
 | Start with Windows | Starts in the notification area |
+| Check for updates automatically | Shows a banner when there's a new version; **Update** downloads it and restarts AirWave (installed or portable). Nothing installs until you press it |
 | Use the graphics card encoder | Screen mirroring at full resolution and 60 fps (on by default). Turn off to use the standard encoder |
 | Use older timing (NTP) | Troubleshooting only, for a speaker that connects but stays silent |
 

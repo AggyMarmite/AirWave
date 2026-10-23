@@ -196,8 +196,52 @@
                 </StackPanel>
             </Border>
 
+            <StackPanel Grid.Row="2">
+            <!-- A newer version is out -->
+            <Border x:Name="UpdateBanner" Margin="16,-6,16,16" CornerRadius="14" Background="{StaticResource SurfaceBrush}"
+                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Padding="14,12"
+                    Visibility="{Binding ShowUpdateBanner, Converter={StaticResource Vis}}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Width="40" Height="40" CornerRadius="20" Background="#1A2DD4BF" VerticalAlignment="Center">
+                        <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="18" Foreground="{StaticResource AccentBrush}"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding UpdateTitle}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding UpdateSubtitle}" Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                        <Grid Height="4" Margin="0,6,0,0" Visibility="{Binding UpdateBusy, Converter={StaticResource Vis}}">
+                            <Border CornerRadius="2" Background="#22FFFFFF"/>
+                            <Border CornerRadius="2" Background="{StaticResource AccentGradient}" RenderTransformOrigin="0,0.5">
+                                <Border.RenderTransform>
+                                    <ScaleTransform ScaleX="{Binding UpdateProgress}"/>
+                                </Border.RenderTransform>
+                            </Border>
+                        </Grid>
+                        <TextBlock Margin="0,4,0,0" FontSize="12.5" Visibility="{Binding UpdateNotBusy, Converter={StaticResource Vis}}">
+                            <Hyperlink Click="WhatsNew_Click" Foreground="{StaticResource AccentBrush}">What's new</Hyperlink>
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Style="{StaticResource AccentButton}" Padding="14,7" Content="Update" Click="Update_Click"
+                                Visibility="{Binding UpdateNotBusy, Converter={StaticResource Vis}}"/>
+                        <Button Style="{StaticResource GhostButton}" Padding="10,6" Margin="4,0,0,0" Click="UpdateLater_Click"
+                                Visibility="{Binding UpdateNotBusy, Converter={StaticResource Vis}}">
+                            <TextBlock Text="Later" FontSize="12.5"/>
+                        </Button>
+                        <Button Style="{StaticResource GhostButton}" Padding="10,6" Click="UpdateCancel_Click"
+                                Visibility="{Binding UpdateBusy, Converter={StaticResource Vis}}">
+                            <TextBlock Text="Cancel" FontSize="12.5"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
             <!-- AirPlay coming in from a phone/Mac -->
-            <Border Grid.Row="2" Margin="16,-6,16,16" CornerRadius="14" Background="{StaticResource SurfaceBrush}"
+            <Border Margin="16,-6,16,16" CornerRadius="14" Background="{StaticResource SurfaceBrush}"
                     BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Padding="14,12"
                     Visibility="{Binding ReceiverActive, Converter={StaticResource Vis}}">
                 <Grid>
@@ -227,6 +271,7 @@
                     </Button>
                 </Grid>
             </Border>
+            </StackPanel>
 
             <!-- Speakers header -->
             <Grid Grid.Row="3" Margin="20,0,12,8">
@@ -441,6 +486,31 @@
                                     <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" Text="AirWave stays in the notification area by the clock so the music keeps playing."/>
                                 </StackPanel>
                             </CheckBox>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="UPDATES" Style="{StaticResource Section}" Margin="4,18,0,8"/>
+                    <Border x:Name="UpdatesCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AutoCheckUpdates, Mode=TwoWay}">
+                                <StackPanel>
+                                    <TextBlock Text="Check for updates automatically" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap" Text="Lets you know when there's a new version. Nothing is installed until you press Update."/>
+                                </StackPanel>
+                            </CheckBox>
+                            <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding UpdateCheckText}" Style="{StaticResource Muted}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <Button Style="{StaticResource AccentButton}" Content="Update now" Padding="14,7" Margin="0,0,8,0" Click="Update_Click"
+                                            Visibility="{Binding UpdateAvailable, Converter={StaticResource Vis}}" IsEnabled="{Binding UpdateNotBusy}"/>
+                                    <Button Style="{StaticResource BaseButton}" Content="Check now" Click="CheckUpdates_Click" IsEnabled="{Binding NotChecking}"/>
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

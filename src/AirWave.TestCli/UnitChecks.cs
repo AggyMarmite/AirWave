@@ -23,6 +23,21 @@ static class UnitChecks
     public static int Run()
     {
         // RFC 7748 5.2
+        // In-app updates: reading a GitHub release and comparing versions
+        {
+            var json = """
+            {"tag_name":"v0.3.0","html_url":"https://github.com/AggyMarmite/AirWave/releases/tag/v0.3.0","draft":false,"prerelease":false,"body":"- Something new",
+             "assets":[{"name":"AirWave-0.3.0-portable.exe","browser_download_url":"https://x/p.exe","size":123,"digest":"sha256:ABCD"},
+                       {"name":"AirWave-Setup-0.3.0.exe","browser_download_url":"https://x/s.exe","size":456,"digest":null}]}
+            """;
+            var u = AirWave.Core.Updates.Updater.Parse(json);
+            Check("update: version", u.Version == new Version(0, 3, 0));
+            Check("update: assets", u.Installer?.Url == "https://x/s.exe" && u.Portable?.Size == 123 && u.Portable.Sha256 == "abcd" && u.Installer.Sha256 == null);
+            Check("update: newer", AirWave.Core.Updates.Updater.TryVersion("v0.10.0", out var a) && AirWave.Core.Updates.Updater.TryVersion("0.9.2", out var b) && a > b);
+            Check("update: same is not newer", AirWave.Core.Updates.Updater.TryVersion("0.2.0", out var c) && !(c > new Version(0, 2, 0)));
+            Check("update: prerelease ignored", AirWave.Core.Updates.Updater.Parse(json.Replace("\"prerelease\":false", "\"prerelease\":true")) == null);
+        }
+
         Check("X25519 vector 1", Convert.ToHexString(Curve25519.X25519(
             Hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
             Hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"))).ToLower()

@@ -51,6 +51,8 @@ Name: "{autodesktop}\AirWave"; Filename: "{app}\AirWave.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\AirWave.exe"; Description: "Open AirWave"; Flags: nowait postinstall skipifsilent
+; In-app updates run this installer quietly with /RELAUNCH=1: start AirWave again afterwards
+Filename: "{app}\AirWave.exe"; Parameters: "--after-update"; Flags: nowait runasoriginaluser; Check: ShouldRelaunch
 
 [Registry]
 ; Remove the "start with Windows" entry the app may have added
@@ -58,3 +60,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{userappdata}\AirWave\log.txt"
+
+[Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;

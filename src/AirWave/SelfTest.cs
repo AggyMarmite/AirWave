@@ -86,6 +86,25 @@ internal static class SelfTest
             Snap(w, Path.Combine(dir, "07-tv-code.png"));
             app.Controller.CancelPrompt();
 
+            // In-app updates: the banner, and a real check against GitHub
+            app.Controller.ShowDemoUpdate();
+            w.ScrollSpeakersToEnd();
+            await Task.Delay(500);
+            Snap(w, Path.Combine(dir, "09-update.png"));
+            app.Controller.HideDemoUpdate();
+            try
+            {
+                var latest = await AirWave.Core.Updates.Updater.CheckAsync(new Version(0, 0, 1));
+                notes.Add($"update check: latest release {latest?.Version} installer={latest?.Installer?.Name} ({latest?.Installer?.Size} bytes, sha256 {(latest?.Installer?.Sha256 != null ? "given" : "not given")}) portable={latest?.Portable?.Name}");
+                if (latest?.Installer == null || latest.Portable == null) { ok = false; notes.Add("update check didn't find the release files"); }
+            }
+            catch (Exception ex) { notes.Add("update check: couldn't reach GitHub (" + ex.Message + ")"); }
+            w.ShowSettings(true);
+            w.UpdatesCard.BringIntoView();
+            await Task.Delay(500);
+            Snap(w, Path.Combine(dir, "10-settings-updates.png"));
+            w.ShowSettings(false);
+
             // Bigger window, to check the layout stretches nicely
             w.Width = 560; w.Height = 820;
             await Task.Delay(500);

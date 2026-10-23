@@ -56,7 +56,11 @@ public partial class App : Application
         timeBeginPeriod(1);
 
         Log.Info($"AirWave {typeof(App).Assembly.GetName().Version?.ToString(3)} starting on {Environment.OSVersion}");
+        bool afterUpdate = args.Contains("--after-update");
+        if (Environment.GetEnvironmentVariable("AIRWAVE_STARTED_MARKER") is { Length: > 0 } marker)
+            try { File.AppendAllText(marker, $"started {typeof(App).Assembly.GetName().Version?.ToString(3)} {Environment.ProcessPath} {string.Join(' ', args)}{Environment.NewLine}"); } catch { }
         Controller = new AppController(Dispatcher);
+        Controller.QuitForUpdate += () => Dispatcher.InvokeAsync(Quit);
         Window = new MainWindow(Controller);
         Tray = new TrayIcon(this);
 
@@ -68,9 +72,13 @@ public partial class App : Application
             return;
         }
 
-        bool toTray = args.Contains("--tray") || Controller.Settings.StartMinimised;
+        bool toTray = !afterUpdate && (args.Contains("--tray") || Controller.Settings.StartMinimised);
         if (!toTray) Window.Show();
         Controller.Start();
+
+        // Test hook (CI): put the given update file in place straight away, as the Update button would
+        if (!afterUpdate && Environment.GetEnvironmentVariable("AIRWAVE_TEST_UPDATE") is { Length: > 0 } testUpdate)
+            _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(3000); await Controller.ApplyUpdateFileAsync(testUpdate); });
     }
 
     public void ShowMainWindow()

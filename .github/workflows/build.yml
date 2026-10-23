@@ -95,11 +95,41 @@ jobs:
           Start-Process $setup -ArgumentList "/VERYSILENT","/CURRENTUSER","/NORESTART","/SUPPRESSMSGBOXES" -Wait
           $exe = "$env:LOCALAPPDATA\Programs\AirWave\AirWave.exe"
           if (-not (Test-Path $exe)) { throw "Installer didn't install AirWave.exe" }
+          # In-app update of the installed copy: AirWave runs the installer quietly, which restarts it
+          $m = "$env:RUNNER_TEMP\update-installed.txt"
+          $env:AIRWAVE_STARTED_MARKER = $m; $env:AIRWAVE_TEST_UPDATE = $setup
+          Start-Process $exe -ArgumentList "--tray"
+          $ok = $false
+          for ($i = 0; $i -lt 90 -and -not $ok; $i++) { Start-Sleep 1; $ok = (Test-Path $m) -and (Select-String -Path $m -Pattern "--after-update" -Quiet) }
+          Remove-Item Env:AIRWAVE_STARTED_MARKER, Env:AIRWAVE_TEST_UPDATE
+          Get-Content $m -ErrorAction SilentlyContinue | Tee-Object -FilePath "$env:RUNNER_TEMP\selftest\update-installed.txt"
+          Stop-Process -Name AirWave -ErrorAction SilentlyContinue; Start-Sleep 2
+          if (-not $ok) { throw "In-app update (installed copy) didn't restart AirWave" }
           $un = "$env:LOCALAPPDATA\Programs\AirWave\unins000.exe"
           Start-Process $un -ArgumentList "/VERYSILENT","/NORESTART","/SUPPRESSMSGBOXES" -Wait
           Start-Sleep 3
           if (Test-Path $exe) { throw "Uninstaller left AirWave.exe behind" }
           "installer: install and uninstall OK" | Tee-Object -FilePath "$env:RUNNER_TEMP\selftest\installer.txt"
+
+      - name: In-app update of the portable .exe
+        shell: pwsh
+        run: |
+          $t = "$env:RUNNER_TEMP\portable"
+          New-Item -ItemType Directory $t | Out-Null
+          Copy-Item publish\AirWave.exe "$t\AirWave.exe"
+          Copy-Item publish\AirWave.exe "$t\AirWave-new-portable.exe"
+          $m = "$t\marker.txt"
+          $env:AIRWAVE_STARTED_MARKER = $m; $env:AIRWAVE_TEST_UPDATE = "$t\AirWave-new-portable.exe"
+          Start-Process "$t\AirWave.exe" -ArgumentList "--tray"
+          $ok = $false
+          for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep 1; $ok = (Test-Path $m) -and (Select-String -Path $m -Pattern "--after-update" -Quiet) }
+          Start-Sleep 25  # the restarted copy tidies up the old .exe once it's running
+          Remove-Item Env:AIRWAVE_STARTED_MARKER, Env:AIRWAVE_TEST_UPDATE
+          $left = Test-Path "$t\AirWave.exe.old"
+          (Get-Content $m -ErrorAction SilentlyContinue) + "old exe left behind: $left" | Tee-Object -FilePath "$env:RUNNER_TEMP\selftest\update-portable.txt"
+          Stop-Process -Name AirWave -ErrorAction SilentlyContinue; Start-Sleep 2
+          if (-not $ok) { throw "In-app update (portable) didn't restart AirWave" }
+          if ($left) { throw "The old .exe wasn't tidied up" }
 
       - name: Self-test (opens the app, screenshots every page)
         shell: pwsh

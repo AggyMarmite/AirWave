@@ -105,6 +105,16 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings(true);
 
+    private async void Update_Click(object sender, RoutedEventArgs e)
+    {
+        ShowSettings(false);
+        await _app.InstallUpdateAsync();
+    }
+    private void UpdateLater_Click(object sender, RoutedEventArgs e) => _app.DismissUpdate();
+    private void UpdateCancel_Click(object sender, RoutedEventArgs e) => _app.CancelUpdate();
+    private void WhatsNew_Click(object sender, RoutedEventArgs e) => AppController.OpenUrl(_app.UpdatePageUrl);
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e) => await _app.CheckForUpdatesAsync(true);
+
     private void SettingsBack_Click(object sender, RoutedEventArgs e) => ShowSettings(false);
 
     public void ShowSettings(bool show)
