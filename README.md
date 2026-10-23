@@ -6,6 +6,7 @@ Play your Windows PC's sound on AirPlay 2 speakers – one speaker or several at
 - **Multi-room in sync** – pick as many speakers as you like. They share one clock (PTP, the same timing Apple devices use), so rooms don't echo. Speakers can join or leave while music is playing.
 - **Per-speaker and overall volume**, plus an option to mute the PC itself while streaming.
 - **Speaker buttons work** – tapping play/pause or skip on a speaker controls whatever is playing on the PC.
+- **AirPlay to this PC** – your PC shows up as an AirPlay speaker on iPhones, iPads and Macs. Play on the PC itself, or pass it on to your AirPlay speakers.
 - **Light** – sits in the notification area by the clock, no background services, no account, no ads.
 
 <p align="center">
@@ -18,9 +19,9 @@ Works with HomePod and HomePod mini, AirPlay 2 Sonos speakers, Apple TV and othe
 
 ## Install
 
-Download `AirWave.exe` from the [latest release](../../releases/latest) and run it. Nothing else to install.
+Download **`AirWave-Setup-x.y.z.exe`** from the [latest release](../../releases/latest) and run it. It installs just for you (no admin needed) and adds AirWave to the Start menu. Prefer no installer? The `portable` .exe runs on its own.
 
-Windows will ask to let AirWave through the firewall the first time – allow it on **private networks**, otherwise speakers can't reach it.
+Windows will ask to let AirWave through the firewall the first time – allow it on **private networks**, otherwise speakers can't reach it and iPhones can't play to it.
 
 ## Using it
 
@@ -29,6 +30,10 @@ Windows will ask to let AirWave through the firewall the first time – allow it
 3. Use each speaker's slider, or **All speakers**, for volume.
 
 If a speaker doesn't appear, use **Add a speaker** and type its IP address.
+
+### Playing from an iPhone, iPad or Mac
+
+Open Control Centre (or the AirPlay button in any app) and pick your PC – it's listed under its name in AirWave's settings. In **Settings → AirPlay to this PC** you can rename it, turn it off, or choose whether it plays on the PC or on your AirPlay speakers.
 
 ### Settings
 
@@ -44,10 +49,10 @@ If a speaker doesn't appear, use **Add a speaker** and type its IP address.
 
 - AirPlay always plays a short time behind the source, so video on the PC will be ahead of the speakers. That's how the protocol works, not a fault.
 - Speakers with a password or PIN aren't supported yet.
+- When passing iPhone audio on to your speakers, it plays a little behind the phone – fine for music, not for video on the phone.
 
 ## Coming next
 
-- **AirPlay receiver** – iPhones, iPads and Macs can play to your PC, and from there on to your speakers.
 - **Screen mirroring to Apple TV** – show your Windows desktop on the TV.
 
 ## Building from source
