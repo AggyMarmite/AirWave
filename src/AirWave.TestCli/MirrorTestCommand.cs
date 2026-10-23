@@ -42,6 +42,22 @@ static class MirrorTestCommand
         }
         Console.WriteLine($"OPEN display={session.Display} audio={session.HasAudio}");
 
+        // --screen N: mirror this PC's real screen for N seconds (Windows), instead of a file
+        if (Arg(args, "--screen") is string secs && OperatingSystem.IsWindows())
+        {
+            AirWave.Core.Audio.Windows.LoopbackSource sound = null;
+            if (session.HasAudio) { sound = new AirWave.Core.Audio.Windows.LoopbackSource(); sound.Start(); }
+            using var mirror = new AirWave.Core.Mirroring.Windows.ScreenMirror(session, sound);
+            mirror.Start();
+            for (int t = 0; t < int.Parse(secs); t++)
+            {
+                await Task.Delay(1000);
+                Console.WriteLine($"SCREEN {mirror.Resolution} frames={mirror.FramesSent} encode={mirror.EncodeMs:0.0}ms open={session.IsOpen} {mirror.LastError}");
+            }
+            sound?.Stop();
+            return mirror.LastError == null && mirror.FramesSent > 0 ? 0 : 1;
+        }
+
         // Split the Annex B file into access units (one per frame, SPS/PPS separated out)
         var aus = H264.AccessUnits(File.ReadAllBytes(h264));
         Console.WriteLine($"{aus.Count} frames to send");

@@ -46,6 +46,23 @@ jobs:
           python tests\windows\check_render.py "$dir\render-rx.txt" "$dir\render-tx.txt" 2>&1 | Tee-Object -FilePath "$dir\render-result.txt"
           if ($LASTEXITCODE -ne 0) { throw "Playback test failed" }
 
+      - name: Screen mirroring from Windows (to a stand-in TV)
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\selftest"
+          $cli = "src\AirWave.TestCli\bin\Release\net8.0\AirWave.TestCli.exe"
+          # Something to look at on screen
+          Start-Process notepad
+          Start-Sleep 2
+          $tv = Start-Process $cli -ArgumentList "mock-tv","--mode","pin","--port","7150","--out","$dir\mirror.h264","--seconds","40" -RedirectStandardOutput "$dir\mirror-tv.txt" -RedirectStandardError "$dir\mirror-tv-err.txt" -PassThru
+          Start-Sleep 3
+          & $cli mirror-test 127.0.0.1:7150 --screen 10 --audio --pin-value 4821 --pair-dir "$env:RUNNER_TEMP\pair" 2>&1 | Tee-Object -FilePath "$dir\mirror-tx.txt"
+          $code = $LASTEXITCODE
+          Start-Sleep 2
+          Stop-Process -Id $tv.Id -ErrorAction SilentlyContinue
+          Stop-Process -Name notepad -ErrorAction SilentlyContinue
+          if ($code -ne 0) { throw "Screen mirroring failed" }
+
       - name: Publish (single file, no .NET install needed)
         run: >
           dotnet publish src/AirWave/AirWave.csproj -c Release -r win-x64

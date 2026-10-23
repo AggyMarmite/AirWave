@@ -277,11 +277,16 @@ internal interface IMFMediaType
 {
     void GetItem(); void GetItemType(); void CompareItem(); void Compare();
     [PreserveSig] int GetUINT32(in Guid key, out uint value);
-    void GetUINT64(); void GetDouble();
+    [PreserveSig] int GetUINT64(in Guid key, out ulong value);
+    void GetDouble();
     [PreserveSig] int GetGUID(in Guid key, out Guid value);
-    void GetStringLength(); void GetString(); void GetAllocatedString(); void GetBlobSize(); void GetBlob(); void GetAllocatedBlob(); void GetUnknown(); void SetItem(); void DeleteItem(); void DeleteAllItems();
+    void GetStringLength(); void GetString(); void GetAllocatedString();
+    [PreserveSig] int GetBlobSize(in Guid key, out uint size);
+    [PreserveSig] int GetBlob(in Guid key, [Out] byte[] buf, uint bufSize, out uint size);
+    void GetAllocatedBlob(); void GetUnknown(); void SetItem(); void DeleteItem(); void DeleteAllItems();
     [PreserveSig] int SetUINT32(in Guid key, uint value);
-    void SetUINT64(); void SetDouble();
+    [PreserveSig] int SetUINT64(in Guid key, ulong value);
+    void SetDouble();
     [PreserveSig] int SetGUID(in Guid key, in Guid value);
     void SetString();
     [PreserveSig] int SetBlob(in Guid key, byte[] buf, uint size);
@@ -292,10 +297,17 @@ internal interface IMFMediaType
 [ComImport, Guid("c40a00f2-b93a-4d80-ae8c-5a1c634f58e4"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 internal interface IMFSample
 {
-    void GetItem(); void GetItemType(); void CompareItem(); void Compare(); void GetUINT32(); void GetUINT64(); void GetDouble(); void GetGUID();
+    void GetItem(); void GetItemType(); void CompareItem(); void Compare();
+    [PreserveSig] int GetUINT32(in Guid key, out uint value);
+    void GetUINT64(); void GetDouble(); void GetGUID();
     void GetStringLength(); void GetString(); void GetAllocatedString(); void GetBlobSize(); void GetBlob(); void GetAllocatedBlob(); void GetUnknown(); void SetItem(); void DeleteItem(); void DeleteAllItems();
     void SetUINT32(); void SetUINT64(); void SetDouble(); void SetGUID(); void SetString(); void SetBlob(); void SetUnknown(); void LockStore(); void UnlockStore(); void GetCount(); void GetItemByIndex(); void CopyAllItems();
-    void GetSampleFlags(); void SetSampleFlags(); void GetSampleTime(); void SetSampleTime(); void GetSampleDuration(); void SetSampleDuration(); void GetBufferCount(); void GetBufferByIndex();
+    void GetSampleFlags(); void SetSampleFlags();
+    [PreserveSig] int GetSampleTime(out long time);
+    [PreserveSig] int SetSampleTime(long time);
+    void GetSampleDuration();
+    [PreserveSig] int SetSampleDuration(long duration);
+    void GetBufferCount(); void GetBufferByIndex();
     [PreserveSig] int ConvertToContiguousBuffer(out IMFMediaBuffer buffer);
     [PreserveSig] int AddBuffer(IMFMediaBuffer buffer);
     void RemoveBufferByIndex(); void RemoveAllBuffers(); void GetTotalLength(); void CopyToBuffer();
