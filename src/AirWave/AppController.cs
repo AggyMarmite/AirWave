@@ -443,7 +443,20 @@ public sealed class AppController : Observable, IAsyncDisposable
 
     // ------------------------------------------------------------------ AirPlay to this PC
 
-    public string ReceiverDefaultName => Environment.MachineName;
+    public string ReceiverDefaultName
+    {
+        get
+        {
+            string m = Environment.MachineName;
+            // Windows' auto-generated names (DESKTOP-4F2K9QX) look odd in an AirPlay list
+            if (System.Text.RegularExpressions.Regex.IsMatch(m, @"^(DESKTOP|LAPTOP|WIN)-[A-Z0-9]{5,}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                string u = Environment.UserName;
+                if (!string.IsNullOrWhiteSpace(u)) return char.ToUpper(u[0]) + u[1..] + "'s PC";
+            }
+            return m;
+        }
+    }
 
     public bool ReceiverEnabled
     {

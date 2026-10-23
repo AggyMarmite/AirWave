@@ -64,6 +64,16 @@ jobs:
           }
           iscc /Q /DAppVersion=0.0.0-ci /DSourceExe=..\publish\AirWave.exe installer\AirWave.iss
           Get-ChildItem installer\Output
+          # Install silently for this user, check it's there, then uninstall
+          $setup = (Get-ChildItem installer\Output\*.exe)[0].FullName
+          Start-Process $setup -ArgumentList "/VERYSILENT","/CURRENTUSER","/NORESTART","/SUPPRESSMSGBOXES" -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\AirWave\AirWave.exe"
+          if (-not (Test-Path $exe)) { throw "Installer didn't install AirWave.exe" }
+          $un = "$env:LOCALAPPDATA\Programs\AirWave\unins000.exe"
+          Start-Process $un -ArgumentList "/VERYSILENT","/NORESTART","/SUPPRESSMSGBOXES" -Wait
+          Start-Sleep 3
+          if (Test-Path $exe) { throw "Uninstaller left AirWave.exe behind" }
+          "installer: install and uninstall OK" | Tee-Object -FilePath "$env:RUNNER_TEMP\selftest\installer.txt"
 
       - name: Self-test (opens the app, screenshots every page)
         shell: pwsh
