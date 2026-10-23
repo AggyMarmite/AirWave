@@ -16,6 +16,9 @@ internal sealed class EventsChannel : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly string _name;
 
+    /// <summary>Every request the receiver sends, as its decoded plist (e.g. updateInfo during screen mirroring).</summary>
+    public event Action<Dictionary<string, object>> Command;
+
     private EventsChannel(string name, TcpClient tcp, byte[] secret)
     {
         _name = name;
@@ -81,6 +84,11 @@ internal sealed class EventsChannel : IDisposable
 
     private void TryRaiseCommand(byte[] body)
     {
+        try
+        {
+            if (body.Length > 8 && Plist.BinaryPlist.Read(body) is Dictionary<string, object> all) Command?.Invoke(all);
+        }
+        catch { }
         try
         {
             if (body.Length > 8 && Plist.BinaryPlist.Read(body) is Dictionary<string, object> d
