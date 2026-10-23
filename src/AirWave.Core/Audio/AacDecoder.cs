@@ -282,14 +282,14 @@ internal interface IMFMediaType
     [PreserveSig] int GetGUID(in Guid key, out Guid value);
     void GetStringLength(); void GetString(); void GetAllocatedString();
     [PreserveSig] int GetBlobSize(in Guid key, out uint size);
-    [PreserveSig] int GetBlob(in Guid key, [Out] byte[] buf, uint bufSize, out uint size);
+    [PreserveSig] int GetBlob(in Guid key, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] buf, uint bufSize, out uint size);
     void GetAllocatedBlob(); void GetUnknown(); void SetItem(); void DeleteItem(); void DeleteAllItems();
     [PreserveSig] int SetUINT32(in Guid key, uint value);
     [PreserveSig] int SetUINT64(in Guid key, ulong value);
     void SetDouble();
     [PreserveSig] int SetGUID(in Guid key, in Guid value);
     void SetString();
-    [PreserveSig] int SetBlob(in Guid key, byte[] buf, uint size);
+    [PreserveSig] int SetBlob(in Guid key, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] buf, uint size);
     void SetUnknown(); void LockStore(); void UnlockStore(); void GetCount(); void GetItemByIndex(); void CopyAllItems();
     void GetMajorType(); void IsCompressedFormat(); void IsEqual(); void GetRepresentation(); void FreeRepresentation();
 }
