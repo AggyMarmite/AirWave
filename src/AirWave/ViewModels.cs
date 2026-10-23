@@ -141,6 +141,46 @@ public sealed class SpeakerViewModel : Observable
     }
 }
 
+public enum ScreenUiState { Off, Connecting, Mirroring, Problem }
+
+/// <summary>A TV (or Mac) the screen can be mirrored to.</summary>
+public sealed class ScreenViewModel : Observable
+{
+    private ScreenUiState _state;
+    private string _status;
+    public SpeakerInfo Info { get; private set; }
+    public string Id => Info.Id;
+    public string Name => Info.Name;
+    public string Glyph => Info.IsMac ? "\uE7F8" : "\uE7F4";
+    public string Kind => Info.IsAppleTv ? "Apple TV" : Info.IsMac ? "Mac" : string.IsNullOrEmpty(Info.Manufacturer) ? "AirPlay screen" : Info.Manufacturer;
+
+    public ScreenViewModel(SpeakerInfo info) { Info = info; _status = Kind; }
+
+    public ScreenUiState State
+    {
+        get => _state;
+        set
+        {
+            if (!Set(ref _state, value)) return;
+            Raise(nameof(IsMirroring)); Raise(nameof(IsBusy)); Raise(nameof(HasProblem)); Raise(nameof(ButtonText));
+        }
+    }
+
+    public bool IsMirroring => _state == ScreenUiState.Mirroring;
+    public bool IsBusy => _state == ScreenUiState.Connecting;
+    public bool HasProblem => _state == ScreenUiState.Problem;
+    public string ButtonText => _state switch { ScreenUiState.Mirroring => "Stop", ScreenUiState.Connecting => "Cancel", _ => "Mirror" };
+    public string Status { get => _status; set => Set(ref _status, value); }
+    public string DefaultStatus => Kind;
+
+    public void Update(SpeakerInfo info)
+    {
+        Info = info;
+        Raise(nameof(Name)); Raise(nameof(Glyph)); Raise(nameof(Kind));
+        if (_state == ScreenUiState.Off) Status = DefaultStatus;
+    }
+}
+
 public sealed record DeviceChoice(string Id, string Name)
 {
     public override string ToString() => Name;

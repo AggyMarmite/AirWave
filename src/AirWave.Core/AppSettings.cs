@@ -23,6 +23,9 @@ public sealed class AppSettings
     public string ReceiverName { get; set; }             // null = the PC's name
     public bool ReceiverPlaysOnSpeakers { get; set; }    // false = this PC's own output
 
+    // Screen mirroring
+    public bool MirrorWithSound { get; set; } = true;
+
     public sealed class ManualSpeaker
     {
         public string Name { get; set; }

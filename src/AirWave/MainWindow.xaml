@@ -15,6 +15,7 @@
 
     <Window.Resources>
         <local:BoolToVisibility x:Key="Vis"/>
+        <local:BoolToVisibility x:Key="InvVis" Invert="True"/>
         <local:BoolToVisibility x:Key="NotVis" Invert="True"/>
         <local:LevelToWidth x:Key="LevelScale"/>
 
@@ -93,6 +94,41 @@
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsAvailable}" Value="False">
                     <Setter TargetName="Card" Property="Opacity" Value="0.55"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ScreenTemplate" DataType="{x:Type local:ScreenViewModel}">
+            <Border x:Name="Card" Style="{StaticResource Card}" Margin="16,0,16,10" Padding="14,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="IconBg" Width="44" Height="44" CornerRadius="22" Background="{StaticResource Surface2Brush}" VerticalAlignment="Center">
+                        <TextBlock x:Name="IconGlyph" Text="{Binding Glyph}" Style="{StaticResource Icon}" FontSize="18" Foreground="{StaticResource MutedBrush}"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="14,0,10,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="StatusText" Text="{Binding Status}" Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                    <Button x:Name="MirrorButton" Grid.Column="2" Style="{StaticResource AccentButton}" VerticalAlignment="Center" Padding="14,7"
+                            Content="{Binding ButtonText}" Click="MirrorButton_Click" MinWidth="76"/>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsMirroring}" Value="True">
+                    <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                    <Setter TargetName="IconBg" Property="Background" Value="#1A2DD4BF"/>
+                    <Setter TargetName="IconGlyph" Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                    <Setter TargetName="MirrorButton" Property="Style" Value="{StaticResource BaseButton}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                    <Setter TargetName="MirrorButton" Property="Style" Value="{StaticResource BaseButton}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HasProblem}" Value="True">
+                    <Setter TargetName="StatusText" Property="Foreground" Value="{StaticResource WarnBrush}"/>
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -202,8 +238,14 @@
             </Grid>
 
             <!-- Speaker list -->
-            <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{Binding Speakers}" ItemTemplate="{StaticResource SpeakerTemplate}" Margin="0,0,0,6"/>
+            <ScrollViewer x:Name="SpeakerScroll" Grid.Row="4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <ItemsControl ItemsSource="{Binding Speakers}" ItemTemplate="{StaticResource SpeakerTemplate}" Margin="0,0,0,6"/>
+                    <StackPanel Visibility="{Binding HasScreens, Converter={StaticResource Vis}}">
+                        <TextBlock Text="MIRROR YOUR SCREEN" Style="{StaticResource Section}" Margin="20,10,0,10"/>
+                        <ItemsControl ItemsSource="{Binding Screens}" ItemTemplate="{StaticResource ScreenTemplate}" Margin="0,0,0,6"/>
+                    </StackPanel>
+                </StackPanel>
             </ScrollViewer>
 
             <!-- Empty state -->
@@ -273,6 +315,23 @@
             </Border>
         </Grid>
 
+        <!-- ===================== TV code / password ===================== -->
+        <Grid x:Name="PromptPanel" Background="#B3070A10" Visibility="{Binding PromptVisible, Converter={StaticResource Vis}}">
+            <Border Style="{StaticResource Card}" Background="{StaticResource Surface2Brush}" Margin="24" VerticalAlignment="Center" Padding="20">
+                <StackPanel>
+                    <TextBlock Text="{Binding PromptTitle}" Style="{StaticResource Title}" FontSize="17" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding PromptMessage}" Style="{StaticResource Muted}" Margin="0,6,0,14" TextWrapping="Wrap"/>
+                    <TextBox x:Name="PromptText" FontSize="22" HorizontalContentAlignment="Center" MaxLength="16"
+                             Visibility="{Binding PromptIsPassword, Converter={StaticResource InvVis}}" KeyDown="Prompt_KeyDown"/>
+                    <PasswordBox x:Name="PromptPassword" FontSize="15" Visibility="{Binding PromptIsPassword, Converter={StaticResource Vis}}" KeyDown="Prompt_KeyDown"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                        <Button Style="{StaticResource BaseButton}" Content="Cancel" Click="PromptCancel_Click" Margin="0,0,8,0"/>
+                        <Button Style="{StaticResource AccentButton}" Content="Continue" Click="PromptOk_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- ===================== Settings ===================== -->
         <Grid x:Name="SettingsPage" Background="{StaticResource BgBrush}" Visibility="Collapsed">
             <Grid.RowDefinitions>
@@ -333,6 +392,23 @@
                                 </ComboBox>
                                 <TextBlock Style="{StaticResource Muted}" Margin="0,8,0,0" TextWrapping="Wrap"
                                            Text="Passing it on to AirPlay speakers adds a short extra delay, so it won't line up with video on the phone."/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="SCREEN MIRRORING" Style="{StaticResource Section}" Margin="4,18,0,8"/>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding MirrorWithSound, Mode=TwoWay}">
+                                <StackPanel>
+                                    <TextBlock Text="Send the PC's sound with the picture" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" Text="Plays through the TV, in time with the picture."/>
+                                </StackPanel>
+                            </CheckBox>
+                            <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource BaseButton}" Content="Forget paired TVs" Click="ForgetTvs_Click"/>
+                                <TextBlock x:Name="ForgetDone" Style="{StaticResource Muted}" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" Text="Done – TVs will ask for a code again."/>
                             </StackPanel>
                         </StackPanel>
                     </Border>

@@ -21,6 +21,9 @@ public sealed class SpeakerInfo
     public bool SupportsPtp => Bit(41);
     public bool SupportsAirPlay2Pairing => Bit(48) || Bit(38) || Bit(46) || Bit(43);
     public bool SupportsBufferedAudio => Bit(40);
+    /// <summary>Can show a mirrored screen (Apple TV, Macs, some smart TVs).</summary>
+    public bool SupportsScreen => Bit(7);
+    public bool IsMac => Model?.StartsWith("Mac", StringComparison.OrdinalIgnoreCase) == true;
     public bool IsHomePod => Model?.StartsWith("AudioAccessory", StringComparison.OrdinalIgnoreCase) == true;
     public bool IsAppleTv => Model?.StartsWith("AppleTV", StringComparison.OrdinalIgnoreCase) == true;
     public bool IsSonos => (Manufacturer ?? "").Contains("Sonos", StringComparison.OrdinalIgnoreCase)

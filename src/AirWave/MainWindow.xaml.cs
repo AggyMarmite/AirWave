@@ -145,4 +145,36 @@ public partial class MainWindow : Window
         if (e.Key == System.Windows.Input.Key.Enter)
             ReceiverNameBox.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)?.UpdateSource();
     }
+
+    private async void MirrorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.DataContext is ScreenViewModel vm) await _app.ToggleMirrorAsync(vm);
+    }
+
+    private void PromptOk_Click(object sender, RoutedEventArgs e)
+    {
+        var value = _app.PromptIsPassword ? PromptPassword.Password : PromptText.Text;
+        PromptText.Text = ""; PromptPassword.Password = "";
+        _app.SubmitPrompt(value);
+    }
+
+    private void PromptCancel_Click(object sender, RoutedEventArgs e)
+    {
+        PromptText.Text = ""; PromptPassword.Password = "";
+        _app.CancelPrompt();
+    }
+
+    private void Prompt_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) PromptOk_Click(sender, e);
+        if (e.Key == System.Windows.Input.Key.Escape) PromptCancel_Click(sender, e);
+    }
+
+    private void ForgetTvs_Click(object sender, RoutedEventArgs e)
+    {
+        _app.ForgetTvPairings();
+        ForgetDone.Visibility = Visibility.Visible;
+    }
+
+    internal void ScrollSpeakersToEnd() => SpeakerScroll.ScrollToEnd();
 }

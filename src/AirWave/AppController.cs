@@ -7,6 +7,8 @@ using AirWave.Core;
 using AirWave.Core.Audio;
 using AirWave.Core.Audio.Windows;
 using AirWave.Core.Discovery;
+using AirWave.Core.Mirroring;
+using AirWave.Core.Mirroring.Windows;
 using AirWave.Core.Receiver;
 using AirWave.Core.Streaming;
 using Microsoft.Win32;
@@ -41,6 +43,7 @@ public sealed class AppController : Observable, IAsyncDisposable
 
     public AppSettings Settings { get; }
     public ObservableCollection<SpeakerViewModel> Speakers { get; } = new();
+    public ObservableCollection<ScreenViewModel> Screens { get; } = new();
     public ObservableCollection<DeviceChoice> Devices { get; } = new();
     public string Version { get; } = typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
@@ -239,6 +242,8 @@ public sealed class AppController : Observable, IAsyncDisposable
             SawOwnReceiver = true;
             return;
         }
+        if (info.SupportsScreen) OnScreenFound(info);
+        if (!info.SupportsAudio) return;
         var vm = Speakers.FirstOrDefault(s => s.Id == info.Id)
                  ?? Speakers.FirstOrDefault(s => s.Info.Txt.ContainsKey("__manual") && info.Addresses.Contains(s.Info.PreferredAddress));
         if (vm != null)
@@ -272,6 +277,8 @@ public sealed class AppController : Observable, IAsyncDisposable
 
     private void OnLost(SpeakerInfo info)
     {
+        var screen = Screens.FirstOrDefault(x => x.Id == info.Id);
+        if (screen != null && screen.State == ScreenUiState.Off) { Screens.Remove(screen); Raise(nameof(HasScreens)); }
         var vm = Speakers.FirstOrDefault(s => s.Id == info.Id);
         if (vm == null) return;
         if (vm.IsOn) return; // still streaming to it; the session itself will tell us if it really went away
@@ -580,9 +587,177 @@ public sealed class AppController : Observable, IAsyncDisposable
 
     public void DisconnectReceiver() => _receiver?.Disconnect();
 
+    // ------------------------------------------------------------------ screen mirroring
+
+    private ScreenViewModel _mirrorTarget;
+    private ScreenMirror _mirror;
+    private LoopbackSource _mirrorSound;
+    private CancellationTokenSource _mirrorCts;
+    private bool _mirrorMutedPc;
+
+    public bool HasScreens => Screens.Count > 0;
+    public bool IsMirroring => _mirror != null;
+
+    public bool MirrorWithSound
+    {
+        get => Settings.MirrorWithSound;
+        set { Settings.MirrorWithSound = value; Settings.Save(); Raise(); }
+    }
+
+    private void OnScreenFound(SpeakerInfo info)
+    {
+        var vm = Screens.FirstOrDefault(s => s.Id == info.Id);
+        if (vm != null) { vm.Update(info); return; }
+        vm = new ScreenViewModel(info);
+        int i = 0;
+        while (i < Screens.Count && string.Compare(Screens[i].Name, vm.Name, StringComparison.CurrentCultureIgnoreCase) < 0) i++;
+        Screens.Insert(i, vm);
+        Raise(nameof(HasScreens));
+    }
+
+    public async Task ToggleMirrorAsync(ScreenViewModel vm)
+    {
+        if (vm.State is ScreenUiState.Mirroring or ScreenUiState.Connecting) { StopMirroring(); return; }
+        StopMirroring();
+        _mirrorTarget = vm;
+        var cts = _mirrorCts = new CancellationTokenSource();
+        vm.State = ScreenUiState.Connecting;
+        vm.Status = "Connecting…";
+        var ep = new IPEndPoint(vm.Info.PreferredAddress, vm.Info.Port);
+        string me = ReceiverDefaultName;
+        var creds = MirrorPairings.Get(AppSettings.Folder, vm.Id);
+        string password = UserSecret.Unprotect(creds?.Password);
+        bool withSound = Settings.MirrorWithSound;
+        try
+        {
+            MirrorSession session = null;
+            for (int attempt = 0; session == null; attempt++)
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                try
+                {
+                    session = await Task.Run(() => MirrorSession.OpenAsync(ep, vm.Name, creds, password, me, withSound, cts.Token), cts.Token);
+                }
+                catch (MirrorException ex) when (attempt < 3 && ex.Problem is MirrorProblem.NeedsPin or MirrorProblem.PairingLost or MirrorProblem.NeedsPassword or MirrorProblem.WrongPassword)
+                {
+                    if (ex.Problem is MirrorProblem.NeedsPassword or MirrorProblem.WrongPassword)
+                    {
+                        vm.Status = "Waiting for the password…";
+                        password = await PromptAsync($"{vm.Name} needs a password",
+                            ex.Problem == MirrorProblem.WrongPassword ? "That password wasn't right. Enter the AirPlay password set on the TV." : "Enter the AirPlay password set on the TV (Settings → AirPlay and HomeKit on Apple TV).", true);
+                        if (password == null) throw new OperationCanceledException();
+                        vm.Status = "Pairing…";
+                        creds = await Task.Run(() => MirrorSession.PairAsync(ep, me, null, password, cts.Token), cts.Token);
+                    }
+                    else
+                    {
+                        vm.Status = "Look at the TV for a code…";
+                        creds = await Task.Run(() => MirrorSession.PairAsync(ep, me,
+                            () => _ui.InvokeAsync(() => PromptAsync($"Pair with {vm.Name}", "Enter the code shown on the TV. You only need to do this once.", false)).Task.Unwrap(),
+                            null, cts.Token), cts.Token);
+                    }
+                    creds.Password = UserSecret.Protect(password);
+                    MirrorPairings.Save(AppSettings.Folder, vm.Id, creds);
+                    vm.Status = "Connecting…";
+                }
+            }
+            if (cts.IsCancellationRequested) { session.Dispose(); throw new OperationCanceledException(); }
+
+            if (withSound && session.HasAudio)
+            {
+                _mirrorSound = new LoopbackSource { DeviceId = Settings.CaptureDeviceId };
+                _mirrorSound.Start();
+                if (Settings.MutePcWhileStreaming && _pcWasMuted == null) { ApplyPcMute(); _mirrorMutedPc = true; }
+            }
+            _mirror = new ScreenMirror(session, _mirrorSound);
+            session.Ended += reason => _ui.InvokeAsync(() =>
+            {
+                if (_mirrorTarget != vm) return;
+                CleanupMirror();
+                vm.State = ScreenUiState.Problem;
+                vm.Status = "Mirroring stopped: " + reason;
+            });
+            _mirror.Start();
+            vm.State = ScreenUiState.Mirroring;
+            vm.Status = withSound && !session.HasAudio ? "Mirroring · picture only" : withSound ? "Mirroring · with sound" : "Mirroring · picture only";
+            Raise(nameof(IsMirroring));
+        }
+        catch (OperationCanceledException)
+        {
+            if (_mirrorTarget == vm) { CleanupMirror(); vm.State = ScreenUiState.Off; vm.Status = vm.DefaultStatus; }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Mirroring to {vm.Name} failed: {ex.Message}");
+            if (_mirrorTarget == vm) CleanupMirror();
+            vm.State = ScreenUiState.Problem;
+            vm.Status = ex is MirrorException ? ex.Message : $"Couldn't connect ({ex.Message})";
+        }
+    }
+
+    public void StopMirroring()
+    {
+        _mirrorCts?.Cancel();
+        CancelPrompt();
+        var vm = _mirrorTarget;
+        CleanupMirror();
+        if (vm != null) { vm.State = ScreenUiState.Off; vm.Status = vm.DefaultStatus; }
+    }
+
+    private void CleanupMirror()
+    {
+        var m = _mirror; _mirror = null;
+        _mirrorTarget = null;
+        if (m != null) _ = Task.Run(m.Dispose);
+        _mirrorSound?.Stop();
+        _mirrorSound = null;
+        if (_mirrorMutedPc) { _mirrorMutedPc = false; if (!IsStreaming) RestorePcMute(); }
+        Raise(nameof(IsMirroring));
+    }
+
+    public void ForgetTvPairings()
+    {
+        try { File.Delete(Path.Combine(AppSettings.Folder, "mirror-pairings.json")); } catch { }
+    }
+
+    // ------------------------------------------------------------------ prompt (TV code / password)
+
+    private TaskCompletionSource<string> _prompt;
+    private bool _promptVisible;
+    private string _promptTitle, _promptMessage;
+    private bool _promptIsPassword;
+    public bool PromptVisible { get => _promptVisible; private set => Set(ref _promptVisible, value); }
+    public string PromptTitle { get => _promptTitle; private set => Set(ref _promptTitle, value); }
+    public string PromptMessage { get => _promptMessage; private set => Set(ref _promptMessage, value); }
+    public bool PromptIsPassword { get => _promptIsPassword; private set => Set(ref _promptIsPassword, value); }
+
+    private Task<string> PromptAsync(string title, string message, bool password)
+    {
+        CancelPrompt();
+        _prompt = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        PromptTitle = title; PromptMessage = message; PromptIsPassword = password;
+        PromptVisible = true;
+        if (Application.Current?.MainWindow is Window w) { w.Show(); w.Activate(); }
+        return _prompt.Task;
+    }
+
+    public void SubmitPrompt(string value)
+    {
+        PromptVisible = false;
+        _prompt?.TrySetResult(string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+    }
+
+    public void CancelPrompt()
+    {
+        PromptVisible = false;
+        _prompt?.TrySetResult(null);
+    }
+
     // ------------------------------------------------------------------ self-test
 
     /// <summary>Sample speakers in each state, for the self-test screenshots only (nothing is connected).</summary>
+    internal void ShowDemoPrompt() => _ = PromptAsync("Pair with Living Room TV", "Enter the code shown on the TV. You only need to do this once.", false);
+
     internal void AddDemoSpeakers()
     {
         SpeakerViewModel Make(string name, string model, string maker, SpeakerUiState state, string status, double vol, bool on)
@@ -608,6 +783,14 @@ public sealed class AppController : Observable, IAsyncDisposable
         Raise(nameof(IsStreaming));
         Level = 0.35;
         _receiverClient = "Sam's iPhone";
+        foreach (var (name, model, state, status) in new[] { ("Living Room TV", "AppleTV14,1", ScreenUiState.Mirroring, "Mirroring · with sound"), ("Bedroom TV", "AppleTV11,1", ScreenUiState.Off, "Apple TV") })
+        {
+            var info = new SpeakerInfo { Id = "demo-screen:" + name, Name = name, Model = model, Features = 1UL << 7 };
+            info.Addresses.Add(IPAddress.Loopback);
+            var sv = new ScreenViewModel(info) { State = state, Status = status };
+            Screens.Add(sv);
+        }
+        Raise(nameof(HasScreens));
         ReceiverLevel = 0.5;
         RaiseReceiver();
         _meter.Stop();
@@ -630,6 +813,7 @@ public sealed class AppController : Observable, IAsyncDisposable
         Settings.Save();
         RestorePcMute();
         try { await StopReceiverAsync(); } catch { }
+        try { StopMirroring(); } catch { }
         try { await _engine.DisposeAsync(); } catch { }
         _browser.Dispose();
     }

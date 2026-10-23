@@ -73,6 +73,15 @@ internal static class SelfTest
             notes.Add($"own AirPlay receiver advertised and discovered: {app.Controller.SawOwnReceiver}");
             if (!app.Controller.SawOwnReceiver) { ok = false; notes.Add("this PC's AirPlay receiver wasn't discoverable"); }
 
+            // Screens to mirror to, and the TV code prompt
+            w.ScrollSpeakersToEnd();
+            await Task.Delay(500);
+            Snap(w, Path.Combine(dir, "06-screens.png"));
+            app.Controller.ShowDemoPrompt();
+            await Task.Delay(500);
+            Snap(w, Path.Combine(dir, "07-tv-code.png"));
+            app.Controller.CancelPrompt();
+
             // Bigger window, to check the layout stretches nicely
             w.Width = 560; w.Height = 820;
             await Task.Delay(500);
