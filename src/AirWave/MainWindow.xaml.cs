@@ -177,4 +177,11 @@ public partial class MainWindow : Window
     }
 
     internal void ScrollSpeakersToEnd() => SpeakerScroll.ScrollToEnd();
+
+    private void PromptPanel_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is true)
+            Dispatcher.BeginInvoke(() => { if (_app.PromptIsPassword) PromptPassword.Focus(); else PromptText.Focus(); },
+                System.Windows.Threading.DispatcherPriority.Input);
+    }
 }

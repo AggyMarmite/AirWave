@@ -316,7 +316,7 @@
         </Grid>
 
         <!-- ===================== TV code / password ===================== -->
-        <Grid x:Name="PromptPanel" Background="#B3070A10" Visibility="{Binding PromptVisible, Converter={StaticResource Vis}}">
+        <Grid x:Name="PromptPanel" Background="#B3070A10" Visibility="{Binding PromptVisible, Converter={StaticResource Vis}}" IsVisibleChanged="PromptPanel_IsVisibleChanged">
             <Border Style="{StaticResource Card}" Background="{StaticResource Surface2Brush}" Margin="24" VerticalAlignment="Center" Padding="20">
                 <StackPanel>
                     <TextBlock Text="{Binding PromptTitle}" Style="{StaticResource Title}" FontSize="17" TextWrapping="Wrap"/>

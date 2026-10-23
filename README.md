@@ -7,6 +7,7 @@ Play your Windows PC's sound on AirPlay 2 speakers – one speaker or several at
 - **Per-speaker and overall volume**, plus an option to mute the PC itself while streaming.
 - **Speaker buttons work** – tapping play/pause or skip on a speaker controls whatever is playing on the PC.
 - **AirPlay to this PC** – your PC shows up as an AirPlay speaker on iPhones, iPads and Macs. Play on the PC itself, or pass it on to your AirPlay speakers.
+- **Mirror your screen to Apple TV** – your desktop (and its sound) on the TV. Pair once with the code the TV shows.
 - **Light** – sits in the notification area by the clock, no background services, no account, no ads.
 
 <p align="center">
@@ -35,6 +36,10 @@ If a speaker doesn't appear, use **Add a speaker** and type its IP address.
 
 Open Control Centre (or the AirPlay button in any app) and pick your PC – it's listed under its name in AirWave's settings. In **Settings → AirPlay to this PC** you can rename it, turn it off, or choose whether it plays on the PC or on your AirPlay speakers.
 
+### Mirroring your screen
+
+Apple TVs (and Macs that accept AirPlay) appear under **Mirror your screen**. Press **Mirror** – the first time, the TV shows a 4-digit code to type into AirWave; after that it just connects. Press **Stop** to end it.
+
 ### Settings
 
 | Setting | What it does |
@@ -50,10 +55,6 @@ Open Control Centre (or the AirPlay button in any app) and pick your PC – it's
 - AirPlay always plays a short time behind the source, so video on the PC will be ahead of the speakers. That's how the protocol works, not a fault.
 - Speakers with a password or PIN aren't supported yet.
 - When passing iPhone audio on to your speakers, it plays a little behind the phone – fine for music, not for video on the phone.
-
-## Coming next
-
-- **Screen mirroring to Apple TV** – show your Windows desktop on the TV.
 
 ## Building from source
 
