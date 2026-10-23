@@ -328,7 +328,8 @@ internal interface IMFTransform
 {
     void GetStreamLimits(); void GetStreamCount(); void GetStreamIDs(); void GetInputStreamInfo();
     [PreserveSig] int GetOutputStreamInfo(uint stream, out MftOutputStreamInfo info);
-    void GetAttributes(); void GetInputStreamAttributes(); void GetOutputStreamAttributes(); void DeleteInputStream(); void AddInputStreams();
+    [PreserveSig] int GetAttributes(out AirWave.Core.Mirroring.Windows.Gpu.IMFAttributes attributes);
+    void GetInputStreamAttributes(); void GetOutputStreamAttributes(); void DeleteInputStream(); void AddInputStreams();
     [PreserveSig] int GetInputAvailableType(uint stream, uint index, out IMFMediaType type);
     [PreserveSig] int GetOutputAvailableType(uint stream, uint index, out IMFMediaType type);
     [PreserveSig] int SetInputType(uint stream, IMFMediaType type, uint flags);

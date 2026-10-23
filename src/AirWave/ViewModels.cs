@@ -171,6 +171,9 @@ public sealed class ScreenViewModel : Observable
     public bool HasProblem => _state == ScreenUiState.Problem;
     public string ButtonText => _state switch { ScreenUiState.Mirroring => "Stop", ScreenUiState.Connecting => "Cancel", _ => "Mirror" };
     public string Status { get => _status; set => Set(ref _status, value); }
+    private string _details;
+    /// <summary>Which capture and encoder are in use (shown as a tooltip while mirroring).</summary>
+    public string Details { get => _details; set => Set(ref _details, value); }
     public string DefaultStatus => Kind;
 
     public void Update(SpeakerInfo info)

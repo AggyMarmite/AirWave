@@ -25,6 +25,7 @@ public sealed class AppSettings
 
     // Screen mirroring
     public bool MirrorWithSound { get; set; } = true;
+    public bool UseGpuEncoder { get; set; } = true;      // graphics card capture + encoder: full resolution, 60 fps
 
     public sealed class ManualSpeaker
     {

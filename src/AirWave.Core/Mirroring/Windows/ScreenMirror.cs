@@ -6,7 +6,7 @@ using AirWave.Core.Timing;
 namespace AirWave.Core.Mirroring.Windows;
 
 /// <summary>
-/// Runs a mirroring session: captures the screen ~30 times a second, encodes it and sends it, and (optionally)
+/// Runs a mirroring session: captures the screen 60 times a second on the graphics card (or 30 with the standard capture), encodes it and sends it, and (optionally)
 /// sends the PC's sound with it, all stamped with capture time so picture and sound line up on the TV.
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -14,20 +14,28 @@ public sealed class ScreenMirror : IDisposable
 {
     private readonly MirrorSession _session;
     private readonly IAudioSource _audio;
-    private readonly int _fps;
+    private readonly bool _useGpu;
     private Thread _video, _sound;
     private volatile bool _run;
     public double EncodeMs { get; private set; }
     public int FramesSent { get; private set; }
     public string Resolution { get; private set; }
+    public int Fps { get; private set; }
+    /// <summary>"Graphics card" or "Processor (software)", once running.</summary>
+    public string Encoder { get; private set; }
+    /// <summary>Full description of the capture and encoder in use.</summary>
+    public string Details { get; private set; }
     public string LastError { get; private set; }
+    /// <summary>Raised (on the video thread) when the capture/encoder in use is chosen or changes.</summary>
+    public event Action PipelineChanged;
 
     /// <param name="audio">The PC's sound (already started), or null for picture only.</param>
-    public ScreenMirror(MirrorSession session, IAudioSource audio, int fps = 30)
+    /// <param name="useGpu">Capture and encode on the graphics card (full resolution, 60 fps) when it can.</param>
+    public ScreenMirror(MirrorSession session, IAudioSource audio, bool useGpu = true)
     {
         _session = session;
         _audio = audio;
-        _fps = fps;
+        _useGpu = useGpu;
     }
 
     public void Start()
@@ -42,37 +50,54 @@ public sealed class ScreenMirror : IDisposable
         }
     }
 
+    private IMirrorPipeline Choose(bool gpu)
+    {
+        var (maxW, maxH) = _session.Display ?? (1920, 1080);
+        if (maxW <= 0 || maxH <= 0) (maxW, maxH) = (1920, 1080);
+        if (gpu)
+        {
+            try { return new GpuPipeline(maxW, maxH, hardwareEncoder: true); }
+            catch (Exception ex) { Log.Info($"Graphics card capture not available ({ex.Message}); using the standard capture"); }
+        }
+        return new SoftwarePipeline(maxW, maxH);
+    }
+
     private void VideoLoop()
     {
+        IMirrorPipeline pipe = null;
+        timeBeginPeriod(1); // 1 ms sleeps, for an even 60 fps
         try
         {
-            var (maxW, maxH) = _session.Display ?? (1920, 1080);
-            if (maxW > 1920 || maxH > 1080) (maxW, maxH) = (1920, 1080); // 4K TVs: 1080p keeps encoding light
-            using var cap = new ScreenCapture(maxW, maxH);
-            using var enc = new H264Encoder(cap.Width, cap.Height, _fps, BitrateFor(cap.Width, cap.Height));
-            Resolution = $"{cap.Width}×{cap.Height}";
-            Log.Info($"Mirroring {cap.SourceWidth}×{cap.SourceHeight} screen at {Resolution}, {_fps} fps");
-            long frameNs = 1_000_000_000L / _fps;
-            long next = MonoClock.NowNs;
+            bool gpu = _useGpu;
             var sw = new Stopwatch();
             while (_run && _session.IsOpen)
             {
-                long now = MonoClock.NowNs;
-                if (now < next) { Thread.Sleep((int)Math.Max(1, (next - now) / 1_000_000)); continue; }
-                // Fell far behind (slow PC)? Skip ahead rather than queue up
-                next = now - next > frameNs * 3 ? now + frameNs : next + frameNs;
+                pipe = Choose(gpu);
+                pipe.Output += Send;
+                Resolution = $"{pipe.Width}×{pipe.Height}";
+                Fps = pipe.Fps;
+                Encoder = pipe.EncoderKind;
+                Details = pipe.Description;
+                Log.Info($"Mirroring: {pipe.Description}");
+                PipelineChanged?.Invoke();
 
-                long captured = MonoClock.NowNs;
-                sw.Restart();
-                var bgra = cap.Capture();
-                var units = enc.Encode(bgra);
-                foreach (var au in units)
+                long frameNs = 1_000_000_000L / pipe.Fps;
+                long next = MonoClock.NowNs;
+                while (_run && _session.IsOpen && !pipe.Broken)
                 {
-                    if (au.Sps != null && au.Pps != null) _session.SetCodecConfig(H264.AvcC(au.Sps, au.Pps), au.Width > 0 ? au.Width : cap.Width, au.Height > 0 ? au.Height : cap.Height);
-                    _session.SendFrame(au.Avcc, au.Keyframe, captured);
-                    FramesSent++;
+                    long now = MonoClock.NowNs;
+                    if (now < next) { Thread.Sleep((int)Math.Max(1, (next - now) / 1_000_000)); continue; }
+                    // Fell far behind (slow PC)? Skip ahead rather than queue up
+                    next = now - next > frameNs * 3 ? now + frameNs : next + frameNs;
+                    sw.Restart();
+                    pipe.Tick(MonoClock.NowNs);
+                    EncodeMs = EncodeMs * 0.95 + sw.Elapsed.TotalMilliseconds * 0.05;
                 }
-                EncodeMs = EncodeMs * 0.95 + sw.Elapsed.TotalMilliseconds * 0.05;
+                pipe.Output -= Send;
+                pipe.Dispose();
+                pipe = null;
+                if (gpu) Log.Warn("Graphics card mirroring failed; switching to the standard capture");
+                gpu = false; // anything after a failure uses the path that works everywhere
             }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
@@ -85,9 +110,26 @@ public sealed class ScreenMirror : IDisposable
             Log.Error($"Mirroring stopped: {ex.Message}");
             _session.Dispose();
         }
+        finally
+        {
+            pipe?.Dispose();
+            timeEndPeriod(1);
+        }
     }
 
-    private static int BitrateFor(int w, int h) => w * h >= 1920 * 1000 ? 10_000_000 : w * h >= 1280 * 700 ? 6_000_000 : 4_000_000;
+    private void Send(H264.AccessUnit au, long captured)
+    {
+        try
+        {
+            if (au.Sps != null && au.Pps != null) _session.SetCodecConfig(H264.AvcC(au.Sps, au.Pps), au.Width, au.Height);
+            _session.SendFrame(au.Avcc, au.Keyframe, captured);
+            FramesSent++;
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+    }
+
+    [System.Runtime.InteropServices.DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint ms);
+    [System.Runtime.InteropServices.DllImport("winmm.dll")] private static extern uint timeEndPeriod(uint ms);
 
     private void SoundLoop()
     {

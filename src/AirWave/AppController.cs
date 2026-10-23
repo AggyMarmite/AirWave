@@ -604,6 +604,12 @@ public sealed class AppController : Observable, IAsyncDisposable
         set { Settings.MirrorWithSound = value; Settings.Save(); Raise(); }
     }
 
+    public bool UseGpuEncoder
+    {
+        get => Settings.UseGpuEncoder;
+        set { Settings.UseGpuEncoder = value; Settings.Save(); Raise(); }
+    }
+
     private void OnScreenFound(SpeakerInfo info)
     {
         var vm = Screens.FirstOrDefault(s => s.Id == info.Id);
@@ -669,7 +675,14 @@ public sealed class AppController : Observable, IAsyncDisposable
                 _mirrorSound.Start();
                 if (Settings.MutePcWhileStreaming && _pcWasMuted == null) { ApplyPcMute(); _mirrorMutedPc = true; }
             }
-            _mirror = new ScreenMirror(session, _mirrorSound);
+            var mirror = _mirror = new ScreenMirror(session, _mirrorSound, Settings.UseGpuEncoder);
+            string soundNote = withSound && session.HasAudio ? "with sound" : "picture only";
+            mirror.PipelineChanged += () => _ui.InvokeAsync(() =>
+            {
+                if (_mirror != mirror) return;
+                vm.Status = $"Mirroring · {soundNote} · {mirror.Resolution}, {mirror.Fps} fps";
+                vm.Details = mirror.Details;
+            });
             session.Ended += reason => _ui.InvokeAsync(() =>
             {
                 if (_mirrorTarget != vm) return;
@@ -679,7 +692,7 @@ public sealed class AppController : Observable, IAsyncDisposable
             });
             _mirror.Start();
             vm.State = ScreenUiState.Mirroring;
-            vm.Status = withSound && !session.HasAudio ? "Mirroring · picture only" : withSound ? "Mirroring · with sound" : "Mirroring · picture only";
+            vm.Status = $"Mirroring · {soundNote}";
             Raise(nameof(IsMirroring));
         }
         catch (OperationCanceledException)

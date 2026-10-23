@@ -47,7 +47,8 @@ static class MirrorTestCommand
         {
             AirWave.Core.Audio.Windows.LoopbackSource sound = null;
             if (session.HasAudio) { sound = new AirWave.Core.Audio.Windows.LoopbackSource(); sound.Start(); }
-            using var mirror = new AirWave.Core.Mirroring.Windows.ScreenMirror(session, sound);
+            using var mirror = new AirWave.Core.Mirroring.Windows.ScreenMirror(session, sound, useGpu: !args.Contains("--no-gpu"));
+            mirror.PipelineChanged += () => Console.WriteLine($"PIPELINE encoder={mirror.Encoder} fps={mirror.Fps} size={mirror.Resolution} :: {mirror.Details}");
             mirror.Start();
             for (int t = 0; t < int.Parse(secs); t++)
             {
@@ -55,6 +56,7 @@ static class MirrorTestCommand
                 Console.WriteLine($"SCREEN {mirror.Resolution} frames={mirror.FramesSent} encode={mirror.EncodeMs:0.0}ms open={session.IsOpen} {mirror.LastError}");
             }
             sound?.Stop();
+            if (Arg(args, "--expect-encoder") is string want && mirror.Encoder != want) { Console.WriteLine($"ERR expected encoder {want}, got {mirror.Encoder}"); return 1; }
             return mirror.LastError == null && mirror.FramesSent > 0 ? 0 : 1;
         }
 

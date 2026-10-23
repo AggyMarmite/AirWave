@@ -111,7 +111,7 @@
                     </Border>
                     <StackPanel Grid.Column="1" Margin="14,0,10,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock x:Name="StatusText" Text="{Binding Status}" Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="StatusText" Text="{Binding Status}" ToolTip="{Binding Details}" ToolTipService.ShowOnDisabled="True" Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
                     <Button x:Name="MirrorButton" Grid.Column="2" Style="{StaticResource AccentButton}" VerticalAlignment="Center" Padding="14,7"
                             Content="{Binding ButtonText}" Click="MirrorButton_Click" MinWidth="76"/>
@@ -403,6 +403,14 @@
                                 <StackPanel>
                                     <TextBlock Text="Send the PC's sound with the picture" FontWeight="SemiBold"/>
                                     <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" Text="Plays through the TV, in time with the picture."/>
+                                </StackPanel>
+                            </CheckBox>
+                            <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
+                            <CheckBox x:Name="GpuEncoderSwitch" Style="{StaticResource Switch}" IsChecked="{Binding UseGpuEncoder, Mode=TwoWay}">
+                                <StackPanel>
+                                    <TextBlock Text="Use the graphics card encoder" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap"
+                                               Text="Full resolution at 60 fps, with little load on the PC. Turn off if the picture has problems; the standard encoder sends up to 1080p at 30 fps. Applies next time you mirror."/>
                                 </StackPanel>
                             </CheckBox>
                             <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>

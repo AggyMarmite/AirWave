@@ -40,6 +40,8 @@ Open Control Centre (or the AirPlay button in any app) and pick your PC – it's
 
 Apple TVs (and Macs that accept AirPlay) appear under **Mirror your screen**. Press **Mirror** – the first time, the TV shows a 4-digit code to type into AirWave; after that it just connects. Press **Stop** to end it.
 
+With the graphics card encoder on (the default), the screen is captured and encoded on the graphics card (NVIDIA, AMD or Intel) at full resolution – up to what the TV shows – and 60 fps. If the PC has no usable encoder, AirWave switches to the standard encoder (up to 1080p at 30 fps) by itself. Hover over the status line while mirroring to see which is in use.
+
 ### Settings
 
 | Setting | What it does |
@@ -48,6 +50,7 @@ Apple TVs (and Macs that accept AirPlay) appear under **Mirror your screen**. Pr
 | Delay | How far ahead sound is sent (default 2 s, like Apple devices). Longer copes better with weak Wi-Fi |
 | Reconnect my speakers when AirWave opens | Turns your last speakers back on at launch |
 | Start with Windows | Starts in the notification area |
+| Use the graphics card encoder | Screen mirroring at full resolution and 60 fps (on by default). Turn off to use the standard encoder |
 | Use older timing (NTP) | Troubleshooting only, for a speaker that connects but stays silent |
 
 ## Good to know

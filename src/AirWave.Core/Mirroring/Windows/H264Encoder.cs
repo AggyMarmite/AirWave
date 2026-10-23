@@ -42,8 +42,7 @@ public sealed unsafe class H264Encoder : IDisposable
     private readonly bool _providesSamples;
     private readonly byte[] _nv12;
     private long _frameIndex;
-    private byte[] _sps, _pps;
-    private bool _configSent;
+    private readonly AccessUnitBuilder _units = new();
 
     public H264Encoder(int width, int height, int fps = 30, int bitrate = 8_000_000)
     {
@@ -90,7 +89,7 @@ public sealed unsafe class H264Encoder : IDisposable
         {
             var blob = new byte[hs];
             outType.GetBlob(MF_MT_MPEG_SEQUENCE_HEADER, blob, hs, out _);
-            Remember(H264.SplitAnnexB(blob));
+            _units.Remember(H264.SplitAnnexB(blob));
         }
         Marshal.ReleaseComObject(outType);
         Marshal.ReleaseComObject(inType);
@@ -120,11 +119,17 @@ public sealed unsafe class H264Encoder : IDisposable
     public List<H264.AccessUnit> Encode(IntPtr bgra)
     {
         BgraToNv12((byte*)bgra, Width, Height, _nv12);
-        Mf.Check(Mf.MFCreateMemoryBuffer((uint)_nv12.Length, out var buf), "buffer");
+        fixed (byte* p = _nv12) return EncodeNv12((IntPtr)p, _nv12.Length);
+    }
+
+    /// <summary>Encodes one NV12 frame (Width×Height, rows packed, chroma plane straight after).</summary>
+    public List<H264.AccessUnit> EncodeNv12(IntPtr nv12, int length)
+    {
+        Mf.Check(Mf.MFCreateMemoryBuffer((uint)length, out var buf), "buffer");
         buf.Lock(out IntPtr p, out _, out _);
-        Marshal.Copy(_nv12, 0, p, _nv12.Length);
+        Buffer.MemoryCopy((void*)nv12, (void*)p, length, length);
         buf.Unlock();
-        buf.SetCurrentLength((uint)_nv12.Length);
+        buf.SetCurrentLength((uint)length);
         Mf.Check(Mf.MFCreateSample(out var sample), "sample");
         sample.AddBuffer(buf);
         long dur = 10_000_000L / Fps;
@@ -171,14 +176,8 @@ public sealed unsafe class H264Encoder : IDisposable
                 Marshal.ReleaseComObject(cb);
                 if (!ReferenceEquals(s, outSample)) Marshal.ReleaseComObject(s);
 
-                var nals = H264.SplitAnnexB(annexB);
-                Remember(nals);
-                var au = H264.FromNals(nals);
-                if (clean) au.Keyframe = true;
-                // Make sure the receiver gets the parameter sets with the first keyframe
-                if (au.Keyframe && au.Sps == null && _sps != null && !_configSent) { au.Sps = _sps; au.Pps = _pps; (au.Width, au.Height) = H264.SpsSize(_sps); }
-                if (au.Sps != null) _configSent = true;
-                if (au.Avcc.Length > 0) result.Add(au);
+                var au = _units.Build(annexB, clean);
+                if (au != null) result.Add(au);
             }
             finally
             {
@@ -189,14 +188,6 @@ public sealed unsafe class H264Encoder : IDisposable
         }
     }
 
-    private void Remember(List<byte[]> nals)
-    {
-        foreach (var n in nals)
-        {
-            if (H264.Type(n) == H264.NalSps) _sps = n;
-            if (H264.Type(n) == H264.NalPps) _pps = n;
-        }
-    }
 
     /// <summary>BGRA -> NV12 (BT.709, video range), two rows at a time in parallel.</summary>
     private static void BgraToNv12(byte* src, int w, int h, byte[] dst)
@@ -233,6 +224,34 @@ public sealed unsafe class H264Encoder : IDisposable
     {
         try { _mft.ProcessMessage(0x10000001, IntPtr.Zero); } catch { } // END_STREAMING
         Marshal.ReleaseComObject(_mft);
+    }
+}
+
+/// <summary>Turns encoder output (Annex B) into access units, making sure the first keyframe carries SPS/PPS.</summary>
+internal sealed class AccessUnitBuilder
+{
+    private byte[] _sps, _pps;
+    private bool _configSent;
+
+    public void Remember(List<byte[]> nals)
+    {
+        foreach (var n in nals)
+        {
+            if (n.Length == 0) continue;
+            if (H264.Type(n) == H264.NalSps) _sps = n;
+            if (H264.Type(n) == H264.NalPps) _pps = n;
+        }
+    }
+
+    public H264.AccessUnit Build(byte[] annexB, bool cleanPoint)
+    {
+        var nals = H264.SplitAnnexB(annexB);
+        Remember(nals);
+        var au = H264.FromNals(nals);
+        if (cleanPoint) au.Keyframe = true;
+        if (au.Keyframe && au.Sps == null && _sps != null && !_configSent) { au.Sps = _sps; au.Pps = _pps; (au.Width, au.Height) = H264.SpsSize(_sps); }
+        if (au.Sps != null) _configSent = true;
+        return au.Avcc.Length > 0 ? au : null;
     }
 }
 
