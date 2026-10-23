@@ -28,6 +28,27 @@ static class ReceiveCommand
         using var output = pipe != null ? new PacedPipeOutput(rx.Player, pipe) : null;
         output?.Start();
 
+        // --render: play through Windows (as the app does) and time each beep that comes out of the default device
+        IDisposable render = null, recorder = null;
+        if (args.Contains("--render") && OperatingSystem.IsWindows())
+        {
+            var r = new AirWave.Core.Audio.Windows.RenderOutput(rx.Player);
+            r.Start();
+            render = r;
+            var rec = new AirWave.Core.Audio.Windows.LoopbackRecorder();
+            double lastOnset = -10;
+            rec.Audio += (t, left, rate) =>
+            {
+                for (int i = 0; i < left.Length; i++)
+                {
+                    double ts = t + i / (double)rate;
+                    if (Math.Abs(left[i]) > 0.02 && ts - lastOnset > 0.5) { lastOnset = ts; Console.WriteLine($"ONSET {ts:F6}"); }
+                }
+            };
+            rec.Start();
+            recorder = rec;
+        }
+
         // --relay ip:port: pass what we receive on to another AirPlay speaker
         if (Arg(args, "--relay") is string relay)
         {
@@ -40,6 +61,8 @@ static class ReceiveCommand
         }
         Console.WriteLine($"READY {name} port {rx.Port}");
         await Task.Delay(seconds * 1000);
+        recorder?.Dispose();
+        render?.Dispose();
         await engine.DisposeAsync();
         return 0;
     }

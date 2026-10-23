@@ -23,7 +23,7 @@ static class SendBufferedCommand
         var frames = ReadAdts(File.ReadAllBytes(aacPath));
         Console.WriteLine($"{frames.Count} AAC frames");
 
-        using var ptp = new PtpMaster();
+        using var ptp = new PtpMaster(standardPorts: !args.Contains("--ptp-any-port"));
         var sessions = new List<Session>();
         foreach (var t in targets)
         {

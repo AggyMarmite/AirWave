@@ -38,15 +38,16 @@ public sealed class PtpMaster : IDisposable
         public DateTime LastSeen;
     }
 
-    public PtpMaster()
+    /// <param name="standardPorts">false = send from any free ports (lets a test sender run beside a receiver on one PC).</param>
+    public PtpMaster(bool standardPorts = true)
     {
         Span<byte> id = stackalloc byte[8];
         RandomNumberGenerator.Fill(id);
         ClockId = BinaryPrimitives.ReadUInt64BigEndian(id) & 0x7fffffffffffffffUL;
         try
         {
-            _event = UdpHelpers.CreateDualMode(EventPort);
-            _general = UdpHelpers.CreateDualMode(GeneralPort);
+            _event = UdpHelpers.CreateDualMode(standardPorts ? EventPort : 0);
+            _general = UdpHelpers.CreateDualMode(standardPorts ? GeneralPort : 0);
             IsRunning = true;
         }
         catch (SocketException ex)

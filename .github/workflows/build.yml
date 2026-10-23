@@ -29,6 +29,23 @@ jobs:
           dotnet run --project src/AirWave.TestCli -c Release --no-build -- unit 2>&1 | Tee-Object -FilePath "$dir\unit.txt"
           if ($LASTEXITCODE -ne 0) { throw "Unit checks failed" }
 
+      - name: Virtual sound card (for the playback test)
+        uses: LABSN/sound-ci-helpers@v1
+
+      - name: AirPlay to this PC through Windows audio
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\selftest"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $cli = "src\AirWave.TestCli\bin\Release\net8.0\AirWave.TestCli.exe"
+          $rx = Start-Process $cli -ArgumentList "receive","--name","CI-AirWave","--render","--seconds","40","--debug" -RedirectStandardOutput "$dir\render-rx.txt" -RedirectStandardError "$dir\render-rx-err.txt" -PassThru
+          Start-Sleep 6
+          & $cli send-buffered 127.0.0.1:7000 --aac tests\data\beeps.adts --seconds 12 --ptp-any-port 2>&1 | Tee-Object -FilePath "$dir\render-tx.txt"
+          Start-Sleep 2
+          Stop-Process -Id $rx.Id -ErrorAction SilentlyContinue
+          python tests\windows\check_render.py "$dir\render-rx.txt" "$dir\render-tx.txt" 2>&1 | Tee-Object -FilePath "$dir\render-result.txt"
+          if ($LASTEXITCODE -ne 0) { throw "Playback test failed" }
+
       - name: Publish (single file, no .NET install needed)
         run: >
           dotnet publish src/AirWave/AirWave.csproj -c Release -r win-x64
