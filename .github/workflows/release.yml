@@ -25,7 +25,18 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:EnableCompressionInSingleFile=true `
             -p:Version=$v -o publish
-          Compress-Archive publish\AirWave.exe "AirWave-$v-win-x64.zip"
+
+      - name: Installer
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $p = "${env:ProgramFiles(x86)}\Inno Setup 6"
+            if (-not (Test-Path "$p\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
+            $env:PATH += ";$p"
+          }
+          iscc /Q /DAppVersion=$v /DSourceExe=..\publish\AirWave.exe installer\AirWave.iss
+          Copy-Item publish\AirWave.exe "AirWave-$v-portable.exe"
 
       - name: Create release
         env:
@@ -33,5 +44,7 @@ jobs:
         shell: pwsh
         run: |
           $v = "${{ github.ref_name }}".TrimStart('v')
-          gh release create "${{ github.ref_name }}" "AirWave-$v-win-x64.zip" publish\AirWave.exe `
-            --title "AirWave $v" --generate-notes
+          $notes = if (Test-Path "release-notes\$v.md") { "release-notes\$v.md" } else { $null }
+          $args = @("${{ github.ref_name }}", "installer\Output\AirWave-Setup-$v.exe", "AirWave-$v-portable.exe", "--title", "AirWave $v")
+          if ($notes) { $args += @("--notes-file", $notes) } else { $args += "--generate-notes" }
+          gh release create @args

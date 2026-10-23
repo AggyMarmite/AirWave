@@ -54,6 +54,17 @@ jobs:
           -p:EnableCompressionInSingleFile=true
           -o publish
 
+      - name: Installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $p = "${env:ProgramFiles(x86)}\Inno Setup 6"
+            if (-not (Test-Path "$p\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
+            $env:PATH += ";$p"
+          }
+          iscc /Q /DAppVersion=0.0.0-ci /DSourceExe=..\publish\AirWave.exe installer\AirWave.iss
+          Get-ChildItem installer\Output
+
       - name: Self-test (opens the app, screenshots every page)
         shell: pwsh
         run: |
@@ -92,4 +103,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: AirWave-win-x64
-          path: publish\AirWave.exe
+          path: |
+            publish\AirWave.exe
+            installer\Output\*.exe
