@@ -717,7 +717,7 @@ public sealed class AppController : Observable, IAsyncDisposable
 
     public void ForgetTvPairings()
     {
-        try { File.Delete(Path.Combine(AppSettings.Folder, "mirror-pairings.json")); } catch { }
+        try { System.IO.File.Delete(System.IO.Path.Combine(AppSettings.Folder, "mirror-pairings.json")); } catch { }
     }
 
     // ------------------------------------------------------------------ prompt (TV code / password)

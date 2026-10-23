@@ -47,6 +47,7 @@ public static class H264
     {
         var au = new AccessUnit();
         var ms = new MemoryStream();
+        var len = new byte[4];
         foreach (var n in nals)
         {
             int t = Type(n);
@@ -54,7 +55,6 @@ public static class H264
             if (t == NalPps) { au.Pps = n; continue; }
             if (t == NalAud) continue;
             if (t == NalIdr) au.Keyframe = true;
-            Span<byte> len = stackalloc byte[4];
             System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(len, n.Length);
             ms.Write(len);
             ms.Write(n);
