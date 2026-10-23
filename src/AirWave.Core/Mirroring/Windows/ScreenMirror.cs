@@ -93,11 +93,13 @@ public sealed class ScreenMirror : IDisposable
                     pipe.Tick(MonoClock.NowNs);
                     EncodeMs = EncodeMs * 0.95 + sw.Elapsed.TotalMilliseconds * 0.05;
                 }
+                bool broken = pipe.Broken;
                 pipe.Output -= Send;
                 pipe.Dispose();
                 pipe = null;
-                if (gpu) Log.Warn("Graphics card mirroring failed; switching to the standard capture");
-                gpu = false; // anything after a failure uses the path that works everywhere
+                if (!broken) break;
+                Log.Warn("Graphics card mirroring failed; switching to the standard capture");
+                gpu = false; // after a failure, use the path that works everywhere
             }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)

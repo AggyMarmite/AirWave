@@ -40,6 +40,10 @@ internal static class SelfTest
             w.ShowSettings(true);
             await Task.Delay(500);
             Snap(w, Path.Combine(dir, "04-settings.png"));
+            w.GpuEncoderSwitch.BringIntoView();
+            await Task.Delay(500);
+            Snap(w, Path.Combine(dir, "08-settings-mirroring.png"));
+            if (w.GpuEncoderSwitch.IsChecked != true) { ok = false; notes.Add("graphics card encoder should be on by default"); }
             w.ShowSettings(false);
 
             // Sound devices and loopback capture (runners may have no sound card: that's reported, not failed)
