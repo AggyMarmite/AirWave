@@ -1,8 +1,10 @@
 name: Release
 
+# Publishing a release = adding release-notes/<version>.md to main (only done when the owner says so).
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: ['release-notes/**']
 
 permissions:
   contents: write
@@ -12,14 +14,37 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Which version
+        id: ver
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The newest release-notes file that doesn't have a release yet
+          $files = Get-ChildItem release-notes\*.md | Sort-Object { [version]$_.BaseName } -Descending
+          $v = $null
+          foreach ($f in $files) {
+            gh release view "v$($f.BaseName)" 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { $v = $f.BaseName; break }
+          }
+          if (-not $v) { Write-Host "Nothing new to release"; "version=" >> $env:GITHUB_OUTPUT; exit 0 }
+          Write-Host "Releasing $v"
+          "version=$v" >> $env:GITHUB_OUTPUT
+          exit 0
+
       - uses: actions/setup-dotnet@v4
+        if: steps.ver.outputs.version != ''
         with:
           dotnet-version: 8.0.x
 
       - name: Publish
+        if: steps.ver.outputs.version != ''
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
+          $v = "${{ steps.ver.outputs.version }}"
           dotnet publish src/AirWave/AirWave.csproj -c Release -r win-x64 `
             --self-contained true -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -27,9 +52,10 @@ jobs:
             -p:Version=$v -o publish
 
       - name: Installer
+        if: steps.ver.outputs.version != ''
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
+          $v = "${{ steps.ver.outputs.version }}"
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
             $p = "${env:ProgramFiles(x86)}\Inno Setup 6"
             if (-not (Test-Path "$p\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
@@ -39,12 +65,10 @@ jobs:
           Copy-Item publish\AirWave.exe "AirWave-$v-portable.exe"
 
       - name: Create release
+        if: steps.ver.outputs.version != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
-          $notes = if (Test-Path "release-notes\$v.md") { "release-notes\$v.md" } else { $null }
-          $args = @("${{ github.ref_name }}", "installer\Output\AirWave-Setup-$v.exe", "AirWave-$v-portable.exe", "--title", "AirWave $v")
-          if ($notes) { $args += @("--notes-file", $notes) } else { $args += "--generate-notes" }
-          gh release create @args
+          $v = "${{ steps.ver.outputs.version }}"
+          gh release create "v$v" "installer\Output\AirWave-Setup-$v.exe" "AirWave-$v-portable.exe" --title "AirWave $v" --notes-file "release-notes\$v.md" --target "${{ github.sha }}"
