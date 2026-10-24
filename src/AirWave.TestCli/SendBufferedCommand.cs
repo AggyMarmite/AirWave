@@ -1,3 +1,4 @@
+using AirWave.Core.Discovery;
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
@@ -24,13 +25,62 @@ static class SendBufferedCommand
         Console.WriteLine($"{frames.Count} AAC frames");
 
         using var ptp = new PtpMaster(standardPorts: !args.Contains("--ptp-any-port"));
+        // --now-playing: act like an iPhone that offers remote control (DACP) and sends track info
+        bool nowPlaying = args.Contains("--now-playing");
+        MdnsResponder dacpAd = null;
+        if (nowPlaying)
+        {
+            var http = new TcpListener(IPAddress.Any, 0);
+            http.Start();
+            int dacpPort = ((IPEndPoint)http.LocalEndpoint).Port;
+            _ = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    using var c = await http.AcceptTcpClientAsync();
+                    var st = c.GetStream();
+                    var buf = new byte[4096];
+                    int n = await st.ReadAsync(buf);
+                    var req = System.Text.Encoding.ASCII.GetString(buf, 0, n);
+                    var first = req.Split("\r\n")[0];
+                    var ar = req.Split("\r\n").FirstOrDefault(l => l.StartsWith("Active-Remote:", StringComparison.OrdinalIgnoreCase))?.Split(':', 2)[1].Trim();
+                    Console.WriteLine($"DACP {first} active-remote={ar}");
+                    await st.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n"));
+                }
+            });
+            dacpAd = new MdnsResponder();
+            dacpAd.Publish(new[] { new ServiceRecord("iTunes_Ctrl_" + DacpId, "_dacp._tcp", dacpPort, new List<(string, string)> { ("txtvers", "1"), ("Ver", "131077") }) });
+            Console.WriteLine($"DACP listening on {dacpPort}");
+        }
         var sessions = new List<Session>();
         foreach (var t in targets)
         {
-            try { sessions.Add(await Session.StartAsync(t, ptp)); Console.WriteLine($"SESSION {t}: ready"); }
+            try { sessions.Add(await Session.StartAsync(t, ptp, nowPlaying)); Console.WriteLine($"SESSION {t}: ready"); }
             catch (Exception ex) { Console.WriteLine($"ERR {t}: {ex.Message}"); }
         }
         if (sessions.Count == 0) return 2;
+        if (nowPlaying)
+        {
+            var art = new byte[3000];
+            new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }.CopyTo(art, 0);
+            var cmd = new Dictionary<string, object>
+            {
+                ["type"] = "updateMRNowPlayingInfo",
+                ["params"] = new Dictionary<string, object>
+                {
+                    ["type"] = "npi-text", ["mergePolicy"] = "replace",
+                    ["params"] = new Dictionary<string, object>
+                    {
+                        ["kMRMediaRemoteNowPlayingInfoTitle"] = "Test Song", ["kMRMediaRemoteNowPlayingInfoArtist"] = "Test Artist",
+                        ["kMRMediaRemoteNowPlayingInfoAlbum"] = "Test Album", ["kMRMediaRemoteNowPlayingInfoDuration"] = 200.0,
+                        ["kMRMediaRemoteNowPlayingInfoElapsedTime"] = 12.5, ["kMRMediaRemoteNowPlayingInfoPlaybackRate"] = 1.0,
+                        ["kMRMediaRemoteNowPlayingInfoTimestamp"] = DateTime.UtcNow, ["kMRMediaRemoteNowPlayingInfoArtworkData"] = art,
+                    },
+                },
+            };
+            foreach (var s in sessions) await s.CommandAsync(cmd);
+            Console.WriteLine("NOWPLAYING sent");
+        }
 
         // Let the receivers lock on to our clock, then anchor: frame rtp0 plays 2 s from now
         await Task.Delay(1500);
@@ -74,7 +124,7 @@ static class SendBufferedCommand
             uint rtp = rtp0 + (uint)(i * 1024);
             long playNs = anchorNs + (long)(i * 1024 * 1e9 / 44100);
             while (playNs - MonoClock.NowNs > 3_000_000_000L) await Task.Delay(20);
-            foreach (var s in sessions) s.SendAudio(seq, rtp, f);
+            foreach (var s in sessions) { try { s.SendAudio(seq, rtp, f); } catch (IOException) { /* that receiver hung up (Shairport times out test senders without keep-alives) */ } }
             seq = (seq + 1) & 0x7fffff;
         }
         await Task.Delay(500);
@@ -82,6 +132,7 @@ static class SendBufferedCommand
         return 0;
     }
 
+    const string DacpId = "14D9A1B6F47C0E3B";
     static string Arg(string[] a, string k) { int i = Array.IndexOf(a, k); return i >= 0 && i + 1 < a.Length ? a[i + 1] : null; }
 
     static List<byte[]> ReadAdts(byte[] d)
@@ -107,7 +158,10 @@ static class SendBufferedCommand
         NetworkStream _data;
         TcpClient _dataTcp;
 
-        public static async Task<Session> StartAsync(IPEndPoint target, PtpMaster ptp)
+        public async Task CommandAsync(Dictionary<string, object> cmd) =>
+            await _rtsp.SendAsync("POST", "/command", BinaryPlist.Write(cmd), "application/x-apple-binary-plist");
+
+        public static async Task<Session> StartAsync(IPEndPoint target, PtpMaster ptp, bool dacp = false)
         {
             var s = new Session { Target = target };
             var ct = CancellationToken.None;
@@ -138,7 +192,8 @@ static class SendBufferedCommand
                 ["timingProtocol"] = "PTP", ["macAddress"] = "02:11:22:33:44:55", ["groupUUID"] = Guid.NewGuid().ToString().ToUpperInvariant(),
                 ["groupContainsGroupLeader"] = false, ["timingPeerInfo"] = peer, ["timingPeerList"] = new List<object> { new Dictionary<string, object>(peer) },
             };
-            var rs = await s._rtsp.SendAsync("SETUP", s._url, BinaryPlist.Write(setup), "application/x-apple-binary-plist", ct: ct);
+            var hdrs = dacp ? new Dictionary<string, string> { ["DACP-ID"] = DacpId, ["Active-Remote"] = "1986535575" } : null;
+            var rs = await s._rtsp.SendAsync("SETUP", s._url, BinaryPlist.Write(setup), "application/x-apple-binary-plist", hdrs, ct: ct);
             if (!rs.Ok) throw new Exception($"session SETUP {rs}");
             ptp.AddPeer(target.Address);
             await s._rtsp.SendAsync("RECORD", s._url, ct: ct);

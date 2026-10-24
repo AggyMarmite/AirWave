@@ -27,6 +27,10 @@ internal sealed class RtspConnection : IDisposable
 
     // Session state
     private string _clientName;
+    /// <summary>What this sender says is playing.</summary>
+    internal NowPlaying NowPlaying { get; } = new();
+    /// <summary>Remote control back to the sender (if it offered it).</summary>
+    internal DacpRemote Remote { get; private set; }
     private bool _ptp;
     private TcpListener _eventListener;
     private TcpClient _eventClient;
@@ -242,8 +246,13 @@ internal sealed class RtspConnection : IDisposable
             case "/fp-setup":
                 var fp = FairPlaySetup.Respond(r.Body);
                 return fp == null ? new Response { Status = 400, Text = "Bad Request" } : new Response { Body = fp };
-            case "/feedback":
             case "/command":
+                {
+                    if (r.Body.Length > 0 && BinaryPlist.Read(r.Body) is Dictionary<string, object> cmd && NowPlaying.ApplyCommand(cmd))
+                        _rx.RaiseNowPlaying(this);
+                    return new Response();
+                }
+            case "/feedback":
             case "/audioMode":
                 return new Response();
             default:
@@ -258,6 +267,8 @@ internal sealed class RtspConnection : IDisposable
         var plist = r.Body.Length > 0 ? BinaryPlist.Read(r.Body) as Dictionary<string, object> : null;
         if (plist == null) return new Response { Status = 400, Text = "Bad Request" };
         if (plist.TryGetValue("name", out var n) && n is string name) _clientName = name;
+        if (Remote == null && r.Header("DACP-ID") is { Length: > 0 } dacpId && r.Header("Active-Remote") is { Length: > 0 } activeRemote)
+            Remote = new DacpRemote(dacpId, activeRemote, _remote.Address);
 
         if (!plist.TryGetValue("streams", out var streamsObj))
         {
@@ -357,7 +368,16 @@ internal sealed class RtspConnection : IDisposable
     private Response HandleSetParameter(Request r)
     {
         string ctype = r.Header("Content-Type") ?? "";
-        if (ctype.StartsWith("text/parameters"))
+        if (ctype.StartsWith("application/x-dmap-tagged"))
+        {
+            if (NowPlaying.ApplyDmap(r.Body)) _rx.RaiseNowPlaying(this);
+        }
+        else if (ctype.StartsWith("image/"))
+        {
+            NowPlaying.ApplyArtwork(r.Body);
+            _rx.RaiseNowPlaying(this);
+        }
+        else if (ctype.StartsWith("text/parameters"))
         {
             foreach (var line in Encoding.UTF8.GetString(r.Body).Split('\n'))
             {
@@ -369,6 +389,8 @@ internal sealed class RtspConnection : IDisposable
                     _rx.Player.SetAirPlayVolume(vol);
                     _rx.RaiseStateChanged();
                 }
+                else if (t.StartsWith("progress:", StringComparison.OrdinalIgnoreCase) && NowPlaying.ApplyProgress(t[9..].Trim()))
+                    _rx.RaiseNowPlaying(this);
             }
         }
         return new Response();
@@ -391,6 +413,8 @@ internal sealed class RtspConnection : IDisposable
         {
             bool playing = (p.GetLong("rate") & 1) != 0;
             _rx.Player.SetPlaying(playing);
+            NowPlaying.SetPlaying(playing);
+            _rx.RaiseNowPlaying(this);
             if (!playing) _rx.Player.ClearAnchor();
             _rx.RaiseStateChanged();
         }

@@ -32,6 +32,19 @@ internal static class SelfTest
             await Task.Delay(900);
             Snap(w, Path.Combine(dir, "02-speakers.png"));
 
+            // Timing nudge panel open on the first speaker
+            var first = app.Controller.Speakers.FirstOrDefault(x => x.IsPlaying);
+            if (first != null)
+            {
+                first.SetOffsetSilently(40);
+                first.ShowTiming = true;
+                await Task.Delay(500);
+                Snap(w, Path.Combine(dir, "11-timing.png"));
+                first.ShowTiming = false;
+                first.SetOffsetSilently(0);
+            }
+            if (!app.Controller.NpHasInfo || !app.Controller.NpHasArtwork) { ok = false; notes.Add("now-playing card didn't pick up the demo track/artwork"); }
+
             w.ShowAddPanel(true);
             await Task.Delay(400);
             Snap(w, Path.Combine(dir, "03-add-speaker.png"));

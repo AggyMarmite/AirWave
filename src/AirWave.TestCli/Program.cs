@@ -51,7 +51,17 @@ if (args[0] == "play")
     var sessions = await Task.WhenAll(tasks);
     foreach (var s in sessions) Console.WriteLine($"SESSION {s.Info.Name}: {s.State} {s.ProblemText}");
     if (sessions.All(s => s.State == SpeakerState.Failed)) { Environment.ExitCode = 2; return; }
-    await Task.Delay(seconds * 1000);
+    // --offset2 ms --offset-after s: nudge the second speaker's timing part-way through (as the app's slider does)
+    if (args.Contains("--offset2"))
+    {
+        int ms = int.Parse(args[Array.IndexOf(args, "--offset2") + 1]);
+        int after = args.Contains("--offset-after") ? int.Parse(args[Array.IndexOf(args, "--offset-after") + 1]) : 0;
+        await Task.Delay(after * 1000);
+        engine.SetSpeakerOffset(sessions[1].Info.Id, ms);
+        Console.WriteLine($"OFFSET {sessions[1].Info.Name} {ms} ms");
+        await Task.Delay(Math.Max(0, seconds - after) * 1000);
+    }
+    else await Task.Delay(seconds * 1000);
     foreach (var s in engine.Sessions) Console.WriteLine($"END {s.Info.Name}: {s.State}");
     return;
 }

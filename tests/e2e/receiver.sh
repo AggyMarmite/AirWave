@@ -74,7 +74,14 @@ MPID=$!
 sleep 0.5
 if [[ "$MODE" == "buffered" ]]; then
   [[ -f beeps.adts ]] || ffmpeg -hide_banner -loglevel error -y -f lavfi -i "aevalsrc=0.25*sin(2*PI*440*t)*lt(mod(t\,1)\,0.1):s=44100:c=stereo:d=20" -c:a aac -b:a 256k -f adts beeps.adts
-  $CLI send-buffered 10.91.0.2:7000,10.92.0.2:7000 --aac "$WORK/beeps.adts" --seconds 14 ${PAUSE_AT:+--pause-at $PAUSE_AT} | tee "$WORK/play.txt" | grep -E "SESSION|END|ERR" || true
+  $CLI send-buffered 10.91.0.2:7000,10.92.0.2:7000 --aac "$WORK/beeps.adts" --seconds 14 ${PAUSE_AT:+--pause-at $PAUSE_AT} ${NOW_PLAYING:+--now-playing} 2>&1 | tee "$WORK/play.txt" | grep -E "SESSION|END|ERR|DACP|NOWPLAYING" || true
+  if [[ -n "${NOW_PLAYING:-}" ]]; then
+    grep -E "NOWPLAYING|REMOTE" $WORK/airwave-rx.log | head -5
+    grep -q "NOWPLAYING title=Test Song artist=Test Artist album=Test Album art=3000 duration=200.0" $WORK/airwave-rx.log || { echo "FAIL: now-playing info didn't arrive"; exit 1; }
+    grep -q "REMOTE playpause ok=True" $WORK/airwave-rx.log || { echo "FAIL: remote control didn't reach the sender"; exit 1; }
+    grep -q "DACP GET /ctrl-int/1/playpause HTTP/1.1 active-remote=1986535575" $WORK/play.txt || { echo "FAIL: sender didn't get the play/pause command"; exit 1; }
+    echo "PASS: now playing (title, artist, album, artwork, position) and play/pause back to the sender"
+  fi
 else
   $CLI play 10.91.0.2:7000,10.92.0.2:7000 --seconds 14 --delay 2000 | tee "$WORK/play.txt" | grep -E "SESSION|END" || true
 fi

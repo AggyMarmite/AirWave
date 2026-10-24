@@ -23,6 +23,35 @@ static class UnitChecks
     public static int Run()
     {
         // RFC 7748 5.2
+        // Now playing (AirPlay 2 /command plist, merge updates, classic DMAP) and DACP lookups
+        {
+            var np = new AirWave.Core.Receiver.NowPlaying();
+            Dictionary<string, object> Cmd(string policy, Dictionary<string, object> p) => new() { ["type"] = "updateMRNowPlayingInfo", ["params"] = new Dictionary<string, object> { ["type"] = "npi-text", ["mergePolicy"] = policy, ["params"] = p } };
+            np.ApplyCommand(Cmd("replace", new() { ["kMRMediaRemoteNowPlayingInfoTitle"] = "A", ["kMRMediaRemoteNowPlayingInfoArtist"] = "B", ["kMRMediaRemoteNowPlayingInfoDuration"] = 100.0,
+                ["kMRMediaRemoteNowPlayingInfoElapsedTime"] = 10.0, ["kMRMediaRemoteNowPlayingInfoPlaybackRate"] = 0.0, ["kMRMediaRemoteNowPlayingInfoTimestamp"] = DateTime.UtcNow }));
+            Check("now playing: replace", np.Title == "A" && np.Artist == "B" && Math.Abs(np.Elapsed - 10) < 0.01 && np.Duration == 100);
+            np.ApplyCommand(Cmd("merge", new() { ["kMRMediaRemoteNowPlayingInfoAlbum"] = "C" }));
+            Check("now playing: merge keeps fields", np.Title == "A" && np.Album == "C");
+            np.ApplyCommand(Cmd("replace", new() { ["kMRMediaRemoteNowPlayingInfoTitle"] = "D" }));
+            Check("now playing: replace clears", np.Title == "D" && np.Artist == null && np.Album == null);
+            var dmap = new List<byte>();
+            void Tag(string t, string v) { var b = System.Text.Encoding.UTF8.GetBytes(v); dmap.AddRange(System.Text.Encoding.ASCII.GetBytes(t)); dmap.AddRange(BitConverter.GetBytes(System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(b.Length))); dmap.AddRange(b); }
+            Tag("minm", "Song é"); Tag("asar", "Artist"); Tag("asal", "Album");
+            var np2 = new AirWave.Core.Receiver.NowPlaying();
+            np2.ApplyDmap(dmap.ToArray());
+            Check("now playing: classic DMAP", np2.Title == "Song é" && np2.Artist == "Artist" && np2.Album == "Album");
+            np2.ApplyProgress("1000/45100/442000");
+            Check("now playing: classic progress", Math.Abs(np2.Duration - 10) < 0.01 && Math.Abs(np2.Elapsed - 1) < 0.1);
+
+            // An mDNS reply with the SRV record for the sender's remote-control service
+            string svc = "iTunes_Ctrl_ABC._dacp._tcp.local";
+            var q = AirWave.Core.Receiver.DacpRemote.Query(svc);
+            var reply = new List<byte> { 0, 0, 0x84, 0, 0, 1, 0, 1, 0, 0, 0, 0 };
+            reply.AddRange(q.Skip(12));                                  // the question
+            reply.AddRange(new byte[] { 0xC0, 12, 0, 33, 0x80, 1, 0, 0, 0, 120, 0, 8, 0, 0, 0, 0, 0x0E, 0x2B, 0xC0, 12 }); // SRV -> port 3627, target = name
+            Check("DACP: SRV port from mDNS reply", AirWave.Core.Receiver.DacpRemote.ParseSrvPort(reply.ToArray(), svc) == 3627);
+        }
+
         // In-app updates: reading a GitHub release and comparing versions
         {
             var json = """

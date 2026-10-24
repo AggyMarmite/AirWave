@@ -92,6 +92,21 @@ public sealed class StreamEngine : IAsyncDisposable
 
     // ------------------------------------------------------------------ speakers
 
+    private readonly ConcurrentDictionary<string, int> _offsets = new();
+
+    /// <summary>
+    /// Per-speaker timing nudge in milliseconds: positive plays that speaker later, negative earlier
+    /// (for speakers or soundbars that add their own delay). Takes effect within a second, even mid-song.
+    /// </summary>
+    public void SetSpeakerOffset(string id, int ms)
+    {
+        ms = Math.Clamp(ms, -MaxOffsetMs, MaxOffsetMs);
+        if (ms == 0) _offsets.TryRemove(id, out _); else _offsets[id] = ms;
+    }
+
+    public int GetSpeakerOffset(string id) => _offsets.TryGetValue(id, out var ms) ? ms : 0;
+    public const int MaxOffsetMs = 500;
+
     public SpeakerSession GetSession(string id) => _sessions.TryGetValue(id, out var s) ? s : null;
 
     /// <summary>Adds a speaker to the group (joins in-sync even while others are already playing).</summary>
@@ -235,7 +250,7 @@ public sealed class StreamEngine : IAsyncDisposable
     {
         if (s.ControlEndPoint == null) return;
         long now = MonoClock.NowNs;
-        long delayNs = DelayMs * 1_000_000L;
+        long delayNs = (DelayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L;
         // The sample that should be playing right now
         long elapsed = now - _t0 - delayNs;
         uint curRtp = (uint)(_rtpBase + (elapsed * Sr / 1_000_000_000L));

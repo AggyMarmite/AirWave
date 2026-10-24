@@ -82,10 +82,28 @@ python3 - "$WORK/sync.txt" <<'PY'
 import sys, re
 t = open(sys.argv[1]).read()
 m = re.search(r"rx1 beeps (\d+) rx2 beeps (\d+)", t)
-d = [float(x) for x in re.findall(r"-?\d+\.\d+", t.split("diffs ms:")[1])] if "diffs ms:" in t else []
+d = [float(x) for x in re.findall(r"-?\d+\.\d+", t.split("diffs ms:")[1].split("\n")[0])] if "diffs ms:" in t else []
 assert m and int(m.group(1)) >= 9 and int(m.group(2)) >= 6, "not enough audio arrived"
 assert len(d) >= 6, "too few matched beeps"
 worst = max(abs(x) for x in d)
 assert worst <= 15, f"speakers out of sync by {worst} ms"
 print(f"PASS: audio intact, both receivers in sync (worst {worst} ms over {len(d)} beeps)")
 PY
+
+echo "== timing nudge: second receiver moved 120 ms later while playing"
+python3 "$HERE/sync_measure.py" 22 "$WORK/rx1.pcm" "$WORK/rx2.pcm" > "$WORK/offset.txt" &
+MPID=$!
+sleep 0.5
+$CLI play 10.91.0.2:7000,10.92.0.2:7000 --seconds 18 --delay 2000 --offset2 120 --offset-after 8 | tee "$WORK/play-offset.txt" | grep -E "SESSION|OFFSET|END"
+wait $MPID
+cat "$WORK/offset.txt"
+python3 - "$WORK/offset.txt" <<'PY2'
+import sys, re
+t = open(sys.argv[1]).read()
+d = [float(x) for x in re.findall(r"-?\d+\.\d+", t.split("diffs ms:")[1].split("\n")[0])]
+assert len(d) >= 10, "too few matched beeps"
+before, after = d[:4], d[-5:]
+assert max(abs(x) for x in before) <= 15, f"not in sync before the nudge: {before}"
+assert all(abs(x - 120) <= 15 for x in after), f"nudge not applied: {after}"
+print(f"PASS: timing nudge moves one speaker (before {before}, after {after})")
+PY2

@@ -13,8 +13,9 @@ namespace AirWave.Core.Receiver;
 /// </summary>
 public sealed class AirPlayReceiver : IAsyncDisposable
 {
-    // Same feature set Shairport Sync advertises (AirPlay 2 audio, buffered + realtime, PTP, transient pairing)
-    public const ulong Features = 0x0001C340401C4A00UL;
+    // Same feature set Shairport Sync advertises (AirPlay 2 audio, buffered + realtime, PTP, transient pairing),
+    // plus bit 50: now-playing info (title, artist, artwork, position) sent as plists in POST /command
+    public const ulong Features = 0x0001C340401C4A00UL | (1UL << 50);
     public const uint StatusFlags = 0x4; // audio cable attached
     public const string SourceVersion = "366.0";
     public const string Model = "AirWave";
@@ -153,9 +154,28 @@ public sealed class AirPlayReceiver : IAsyncDisposable
         if (conn == null) Player.Reset();
         if (conn != null) Log.Info($"AirPlay: {ActiveClient} is playing to this PC");
         StateChanged?.Invoke();
+        NowPlayingChanged?.Invoke();
     }
 
     internal void RaiseStateChanged() => StateChanged?.Invoke();
+
+    /// <summary>Title, artist, artwork etc. of what's playing to us now (null when nothing is).</summary>
+    public NowPlaying NowPlaying => ActiveStream?.NowPlaying;
+    /// <summary>True if the sender offered remote control (play/pause, next, previous).</summary>
+    public bool HasRemote => ActiveStream?.Remote != null;
+    public event Action NowPlayingChanged;
+
+    internal void RaiseNowPlaying(RtspConnection conn)
+    {
+        if (ActiveStream == null || ReferenceEquals(ActiveStream, conn)) NowPlayingChanged?.Invoke();
+    }
+
+    /// <summary>Asks the device playing to us to play/pause, skip, etc. Returns false if it couldn't be reached.</summary>
+    public Task<bool> SendRemoteAsync(RemoteCommand command)
+    {
+        var remote = ActiveStream?.Remote;
+        return remote == null ? Task.FromResult(false) : remote.SendAsync(command);
+    }
 
     /// <summary>Stops whatever is playing (the sender sees the speaker disconnect).</summary>
     public void Disconnect()

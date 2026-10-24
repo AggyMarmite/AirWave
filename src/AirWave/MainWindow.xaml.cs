@@ -105,6 +105,15 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings(true);
 
+    private async void RemotePlayPause_Click(object sender, RoutedEventArgs e) => await _app.RemoteAsync(AirWave.Core.Receiver.RemoteCommand.PlayPause);
+    private async void RemoteNext_Click(object sender, RoutedEventArgs e) => await _app.RemoteAsync(AirWave.Core.Receiver.RemoteCommand.Next);
+    private async void RemotePrevious_Click(object sender, RoutedEventArgs e) => await _app.RemoteAsync(AirWave.Core.Receiver.RemoteCommand.Previous);
+
+    private void ResetTiming_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is SpeakerViewModel vm) vm.OffsetMs = 0;
+    }
+
     private async void Update_Click(object sender, RoutedEventArgs e)
     {
         ShowSettings(false);

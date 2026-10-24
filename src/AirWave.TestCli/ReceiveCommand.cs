@@ -24,6 +24,18 @@ static class ReceiveCommand
         await using var rx = new AirPlayReceiver(id, engine.Ptp, name, new MdnsResponder());
         rx.Start(port);
         rx.StateChanged += () => Console.WriteLine($"STATE client={rx.ActiveClient ?? "-"}");
+        bool remoteSent = false;
+        rx.NowPlayingChanged += () =>
+        {
+            var np = rx.NowPlaying;
+            if (np == null || !np.HasInfo) return;
+            Console.WriteLine($"NOWPLAYING title={np.Title} artist={np.Artist} album={np.Album} art={np.Artwork?.Length ?? 0} duration={np.Duration:0.0} elapsed={np.Elapsed:0.0} rate={np.Rate} remote={rx.HasRemote}");
+            if (rx.HasRemote && !remoteSent)
+            {
+                remoteSent = true;
+                _ = Task.Run(async () => Console.WriteLine($"REMOTE playpause ok={await rx.SendRemoteAsync(RemoteCommand.PlayPause)}"));
+            }
+        };
 
         using var output = pipe != null ? new PacedPipeOutput(rx.Player, pipe) : null;
         output?.Start();

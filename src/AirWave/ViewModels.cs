@@ -80,6 +80,29 @@ public sealed class SpeakerViewModel : Observable
 
     public string VolumePercent => $"{Math.Round(_volume * 100)}%";
 
+    private int _offsetMs;
+    private bool _showTiming;
+
+    /// <summary>Timing nudge: + plays this speaker later, − earlier.</summary>
+    public double OffsetMs
+    {
+        get => _offsetMs;
+        set
+        {
+            int ms = (int)(Math.Round(value / 5) * 5);
+            if (!Set(ref _offsetMs, ms)) return;
+            Raise(nameof(OffsetText)); Raise(nameof(HasOffset));
+            _app.OnSpeakerOffsetChanged(this);
+        }
+    }
+
+    internal int OffsetValue => _offsetMs;
+    internal void SetOffsetSilently(int ms) { _offsetMs = ms; Raise(nameof(OffsetMs)); Raise(nameof(OffsetText)); Raise(nameof(HasOffset)); }
+
+    public bool HasOffset => _offsetMs != 0;
+    public string OffsetText => _offsetMs == 0 ? "In sync (no change)" : _offsetMs > 0 ? $"{_offsetMs} ms later" : $"{-_offsetMs} ms earlier";
+    public bool ShowTiming { get => _showTiming; set => Set(ref _showTiming, value); }
+
     public SpeakerUiState State
     {
         get => _state;

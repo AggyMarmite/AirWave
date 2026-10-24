@@ -10,6 +10,7 @@ public sealed class AppSettings
     public int DelayMs { get; set; } = 2000;
     public double MasterVolume { get; set; } = 0.6;
     public Dictionary<string, double> SpeakerVolumes { get; set; } = new();
+    public Dictionary<string, int> SpeakerOffsets { get; set; } = new(); // timing nudge, ms (+ = later)
     public List<string> LastSpeakers { get; set; } = new(); // reconnect these on launch if wanted
     public bool ReconnectOnLaunch { get; set; } = true;
     public bool StartWithWindows { get; set; }

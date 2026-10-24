@@ -76,6 +76,7 @@ public sealed class AppController : Observable, IAsyncDisposable
         {
             Level = _engine.IsStreaming ? _engine.Source?.Level ?? 0 : 0;
             ReceiverLevel = _receiver?.Player.Level ?? 0;
+            if (_npHasInfo && ++_npTick % 10 == 0) UpdateNowPlayingProgress();
         };
     }
 
@@ -258,6 +259,11 @@ public sealed class AppController : Observable, IAsyncDisposable
         }
         double vol = Settings.SpeakerVolumes.TryGetValue(info.Id, out var v) ? v : 0.7;
         vm = new SpeakerViewModel(this, info, vol);
+        if (Settings.SpeakerOffsets.TryGetValue(info.Id, out int off) && off != 0)
+        {
+            vm.SetOffsetSilently(off);
+            _engine.SetSpeakerOffset(info.Id, off);
+        }
         InsertSorted(vm);
         Raise(nameof(ShowEmpty));
         UpdateStatusLine();
@@ -413,6 +419,14 @@ public sealed class AppController : Observable, IAsyncDisposable
         _ = Task.Delay(80, cts.Token).ContinueWith(t => { if (!t.IsCanceled) _ = session.SetVolumeAsync(v); }, TaskScheduler.Default);
     }
 
+    internal void OnSpeakerOffsetChanged(SpeakerViewModel vm)
+    {
+        int ms = vm.OffsetValue;
+        if (ms == 0) Settings.SpeakerOffsets.Remove(vm.Id); else Settings.SpeakerOffsets[vm.Id] = ms;
+        SaveSoon();
+        _engine.SetSpeakerOffset(vm.Id, ms);
+    }
+
     private void RememberGroup()
     {
         Settings.LastSpeakers = Speakers.Where(s => s.IsOn).Select(s => s.Id).ToList();
@@ -520,14 +534,98 @@ public sealed class AppController : Observable, IAsyncDisposable
     }
 
     public bool ReceiverActive => _receiverClient != null;
-    public string ReceiverTitle => _receiverClient == null ? "" : $"Playing from {_receiverClient}";
-    public string ReceiverSubtitle => !ReceiverPlaysOnSpeakers
+    public string ReceiverTitle => _receiverClient == null ? "" : NpHasInfo && _npTitle != null ? _npTitle : $"Playing from {_receiverClient}";
+    private string Where => !ReceiverPlaysOnSpeakers
         ? "On this PC's speakers"
         : Speakers.Any(s => s.IsOn) ? "Passing it on to your speakers below" : "Switch on a speaker below to hear it";
+    public string ReceiverSubtitle => NpHasInfo ? $"From {_receiverClient} · {Where.Replace("On this PC", "on this PC")}" : Where;
+
+    // ---- now playing (title, artist, artwork from the iPhone/Mac)
+
+    private string _npTitle, _npArtist, _npTimes;
+    private System.Windows.Media.ImageSource _npArt;
+    private int _npArtVersion = -1;
+    private double _npProgress;
+    private bool _npHasInfo, _npPlaying = true, _npHasDuration, _hasRemote;
+    private byte[] _npArtBytes;
+
+    public bool NpHasInfo => _npHasInfo;
+    /// <summary>"Artist — Album".</summary>
+    public string NpArtist => _npArtist;
+    public bool NpHasArtist => !string.IsNullOrEmpty(_npArtist);
+    public System.Windows.Media.ImageSource NpArtwork => _npArt;
+    public bool NpHasArtwork => _npArt != null;
+    public bool NpNoArtwork => _npArt == null;
+    public double NpProgress { get => _npProgress; private set => Set(ref _npProgress, value); }
+    public string NpTimes { get => _npTimes; private set => Set(ref _npTimes, value); }
+    public bool NpHasDuration => _npHasDuration;
+    public bool HasRemote => _hasRemote;
+    public string PlayPauseGlyph => _npPlaying ? "\uE769" : "\uE768"; // pause / play
+    public string PlayPauseTip => _npPlaying ? "Pause" : "Play";
+
+    private void OnNowPlaying()
+    {
+        var np = _demoNp ?? _receiver?.NowPlaying;
+        bool has = _receiverClient != null && np != null && np.HasInfo;
+        _npHasInfo = has;
+        _npTitle = has ? np.Title ?? np.Album ?? "Unknown track" : null;
+        _npArtist = has ? string.Join(" — ", new[] { np.Artist, np.Title != null ? np.Album : null }.Where(x => !string.IsNullOrEmpty(x))) : null;
+        _npPlaying = np == null || np.Rate > 0;
+        _hasRemote = (_demoNp != null || _receiver?.HasRemote == true) && _receiverClient != null;
+        var art = has ? np.Artwork : null;
+        if (!ReferenceEquals(art, _npArtBytes))
+        {
+            _npArtBytes = art;
+            _npArt = LoadImage(art);
+        }
+        UpdateNowPlayingProgress();
+        foreach (var n in new[] { nameof(NpHasInfo), nameof(NpArtist), nameof(NpHasArtist), nameof(NpArtwork), nameof(NpHasArtwork), nameof(NpNoArtwork),
+                                   nameof(NpHasDuration), nameof(HasRemote), nameof(PlayPauseGlyph), nameof(PlayPauseTip), nameof(ReceiverTitle), nameof(ReceiverSubtitle) })
+            Raise(n);
+    }
+
+    private NowPlaying _demoNp;
+
+    private void UpdateNowPlayingProgress()
+    {
+        var np = _demoNp ?? _receiver?.NowPlaying;
+        bool hasDur = _npHasInfo && np != null && np.Duration > 0;
+        if (hasDur != _npHasDuration) { _npHasDuration = hasDur; Raise(nameof(NpHasDuration)); }
+        if (!hasDur) return;
+        double e = np.Elapsed;
+        NpProgress = e / np.Duration;
+        NpTimes = $"{Clock(e)} / {Clock(np.Duration)}";
+        static string Clock(double s) { var t = TimeSpan.FromSeconds(Math.Max(0, s)); return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss"); }
+    }
+
+    private static System.Windows.Media.ImageSource LoadImage(byte[] bytes)
+    {
+        if (bytes == null || bytes.Length < 8) return null;
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.DecodePixelWidth = 160;
+            bmp.StreamSource = new System.IO.MemoryStream(bytes);
+            bmp.EndInit();
+            bmp.Freeze();
+            return bmp;
+        }
+        catch (Exception ex) { Log.Debug($"Artwork couldn't be shown: {ex.Message}"); return null; }
+    }
+
+    public async Task RemoteAsync(RemoteCommand command)
+    {
+        if (_receiver == null) return;
+        bool ok = await _receiver.SendRemoteAsync(command);
+        if (!ok) Log.Info($"Remote control ({command}) didn't reach {_receiverClient}");
+    }
     public string ReceiverHint => ReceiverEnabled
         ? $"Shows up as “{ReceiverName}” in AirPlay on your iPhone, iPad and Mac."
         : "Turned off: this PC won't show up as an AirPlay speaker.";
 
+    private int _npTick;
     private double _receiverLevel;
     public double ReceiverLevel { get => _receiverLevel; private set => Set(ref _receiverLevel, value); }
 
@@ -539,6 +637,7 @@ public sealed class AppController : Observable, IAsyncDisposable
             var id = ReceiverIdentity.LoadOrCreate(AppSettings.Folder);
             _receiver = new AirPlayReceiver(id, _engine.Ptp, ReceiverName);
             _receiver.StateChanged += () => _ui.InvokeAsync(OnReceiverState);
+            _receiver.NowPlayingChanged += () => _ui.InvokeAsync(OnNowPlaying);
             _receiver.Start();
             _relay = new RelaySource(_receiver.Player);
             _render = new RenderOutput(_receiver.Player) { DeviceId = Settings.CaptureDeviceId };
@@ -586,6 +685,7 @@ public sealed class AppController : Observable, IAsyncDisposable
     private void RaiseReceiver()
     {
         Raise(nameof(ReceiverActive)); Raise(nameof(ReceiverTitle)); Raise(nameof(ReceiverSubtitle));
+        OnNowPlaying();
     }
 
     public void DisconnectReceiver() => _receiver?.Disconnect();
@@ -772,6 +872,24 @@ public sealed class AppController : Observable, IAsyncDisposable
     // ------------------------------------------------------------------ self-test
 
     /// <summary>Sample speakers in each state, for the self-test screenshots only (nothing is connected).</summary>
+    private static byte[] DemoArtwork()
+    {
+        var v = new System.Windows.Media.DrawingVisual();
+        using (var dc = v.RenderOpen())
+        {
+            dc.DrawRectangle(new System.Windows.Media.LinearGradientBrush(System.Windows.Media.Color.FromRgb(0xF0, 0x6A, 0x5A), System.Windows.Media.Color.FromRgb(0x3B, 0x2F, 0x8F), 45), null, new Rect(0, 0, 160, 160));
+            dc.DrawEllipse(new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0xCC, 0xFF, 0xD2, 0x7A)), null, new Point(108, 62), 26, 26);
+            dc.DrawRectangle(new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0x99, 0x10, 0x14, 0x30)), null, new Rect(0, 112, 160, 48));
+        }
+        var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap(160, 160, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+        bmp.Render(v);
+        var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bmp));
+        using var ms = new System.IO.MemoryStream();
+        enc.Save(ms);
+        return ms.ToArray();
+    }
+
     internal void ShowDemoPrompt() => _ = PromptAsync("Pair with Living Room TV", "Enter the code shown on the TV. You only need to do this once.", false);
 
     internal void AddDemoSpeakers()
@@ -799,6 +917,22 @@ public sealed class AppController : Observable, IAsyncDisposable
         Raise(nameof(IsStreaming));
         Level = 0.35;
         _receiverClient = "Sam's iPhone";
+        _demoNp = new NowPlaying();
+        _demoNp.ApplyCommand(new Dictionary<string, object>
+        {
+            ["type"] = "updateMRNowPlayingInfo",
+            ["params"] = new Dictionary<string, object>
+            {
+                ["type"] = "npi-text", ["mergePolicy"] = "replace",
+                ["params"] = new Dictionary<string, object>
+                {
+                    ["kMRMediaRemoteNowPlayingInfoTitle"] = "Midnight Drive", ["kMRMediaRemoteNowPlayingInfoArtist"] = "The Long Weekends",
+                    ["kMRMediaRemoteNowPlayingInfoAlbum"] = "Coastal Lights", ["kMRMediaRemoteNowPlayingInfoDuration"] = 214.0,
+                    ["kMRMediaRemoteNowPlayingInfoElapsedTime"] = 83.0, ["kMRMediaRemoteNowPlayingInfoPlaybackRate"] = 1.0,
+                    ["kMRMediaRemoteNowPlayingInfoArtworkData"] = DemoArtwork(),
+                },
+            },
+        });
         foreach (var (name, model, state, status) in new[] { ("Living Room TV", "AppleTV14,1", ScreenUiState.Mirroring, "Mirroring · with sound"), ("Bedroom TV", "AppleTV11,1", ScreenUiState.Off, "Apple TV") })
         {
             var info = new SpeakerInfo { Id = "demo-screen:" + name, Name = name, Model = model, Features = 1UL << 7 };
