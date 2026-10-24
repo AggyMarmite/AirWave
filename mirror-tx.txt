@@ -1,0 +1,19 @@
+PAIRING needed (NeedsPin): The TV wants this PC paired first
+PAIRED
+11:04:58.116 [I] Mirroring to Test TV: screen 1920x1080, sound on
+OPEN display=(1920, 1080) audio=True
+11:04:58.144 [I] Capturing "Speakers (VB-Audio Virtual Cable)" (48000 Hz, 2 ch, float)
+11:04:58.219 [I] Graphics card capture not available (Media Foundation: video processor on the graphics card failed (80004002)); using the standard capture
+11:04:58.259 [I] Mirroring: 1024×768 screen → 1024×768 at 30 fps, Windows H.264 encoder
+PIPELINE encoder=Processor (software) fps=30 size=1024×768 :: 1024×768 screen → 1024×768 at 30 fps, Windows H.264 encoder
+11:04:58.321 [I] Mirroring stats: 1 frames, 0 dropped, encode 3.1 ms, capture→sent 0 ms, delay on TV 250 ms, 4.0 Mbit/s
+SCREEN 1024×768 frames=25 encode=21.5ms open=True 
+SCREEN 1024×768 frames=56 encode=24.0ms open=True 
+SCREEN 1024×768 frames=86 encode=24.6ms open=True 
+SCREEN 1024×768 frames=116 encode=24.6ms open=True 
+SCREEN 1024×768 frames=146 encode=24.9ms open=True 
+SCREEN 1024×768 frames=176 encode=24.8ms open=True 
+SCREEN 1024×768 frames=206 encode=24.8ms open=True 
+SCREEN 1024×768 frames=236 encode=25.4ms open=True 
+SCREEN 1024×768 frames=266 encode=26.4ms open=True 
+SCREEN 1024×768 frames=296 encode=25.3ms open=True 

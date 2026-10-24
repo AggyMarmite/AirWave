@@ -1,0 +1,30 @@
+MOCKTV ready mode=pin port=7151
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-pin-start
+PIN 4821
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-verify
+MOCKTV <- POST /pair-verify
+MOCKTV <- SETUP rtsp://127.0.0.1:7151/2272841596931510182
+SESSION name=AirWave Test mirroring=True
+MOCKTV <- RECORD rtsp://127.0.0.1:7151/2272841596931510182
+EVENTS reply RTSP/1.0 200 OK
+MOCKTV <- SETUP rtsp://127.0.0.1:7151/5412842537543690211
+CODEC 1024x768 sps 26 pps 4 ts 6ADC90EA0DE81CB4
+FRAME 1 key=True bytes=14670 lead=218ms clock=1122334455667788
+FRAME 31 key=False bytes=259 lead=227ms clock=1122334455667788
+MOCKTV <- POST /feedback
+CODEC 1024x768 sps 26 pps 4 ts 6ADC90EC0D6F03C3
+FRAME 61 key=True bytes=24076 lead=232ms clock=1122334455667788
+FRAME 91 key=False bytes=222 lead=245ms clock=1122334455667788
+MOCKTV <- POST /feedback
+CODEC 1024x768 sps 26 pps 4 ts 6ADC90EE0D087519
+FRAME 121 key=True bytes=24076 lead=233ms clock=1122334455667788
+FRAME 151 key=False bytes=222 lead=244ms clock=1122334455667788
+MOCKTV <- POST /feedback
+MOCKTV <- TEARDOWN rtsp://127.0.0.1:7151/2272841596931510182
+TEARDOWN
+VIDEO frames=180 keyframes=3 late=0 gaps_without_keyframe=0
+VIDEO done frames=180 keyframes=3 heartbeats=6

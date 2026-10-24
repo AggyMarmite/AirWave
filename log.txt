@@ -1,0 +1,6 @@
+11:07:28.773 [I] AirWave 0.4.0 starting on Microsoft Windows NT 10.0.26100.0
+11:07:29.112 [I] mDNS: advertising 1A9B3C2C3549@runnervmdaln5._raop._tcp.local on port 7000
+11:07:29.112 [I] mDNS: advertising runnervmdaln5._airplay._tcp.local on port 7000
+11:07:29.112 [I] AirPlay receiver "runnervmdaln5" listening on port 7000
+11:07:29.869 [I] mDNS: found runnervmdaln5 (AirPlay speaker, 10.1.0.181:7000) features=0x5C340401C4A00 model=AirWave
+11:07:34.002 [I] Capturing "Speakers (VB-Audio Virtual Cable)" (48000 Hz, 2 ch, float)

@@ -1,0 +1,54 @@
+11:04:27.700 [I] AirPlay receiver "CI-AirWave" listening on port 7000
+READY CI-AirWave port 7000
+11:04:27.927 [I] Playback on Speakers (VB-Audio Virtual Cable) (buffer 60 ms, latency 0.0 ms)
+11:04:33.341 [D] AirPlay <- GET /info (0 bytes)
+11:04:33.373 [D] AirPlay <- POST /pair-setup (9 bytes)
+11:04:33.438 [D] AirPlay <- POST /pair-setup (457 bytes)
+11:04:33.461 [D] AirPlay: 127.0.0.1 paired (transient)
+11:04:33.476 [D] AirPlay <- SETUP rtsp://127.0.0.1/2045718176 (685 bytes)
+11:04:33.492 [D] AirPlay <- RECORD rtsp://127.0.0.1/2045718176 (0 bytes)
+11:04:33.492 [D] PTP: first message type 0x0 from 127.0.0.1 (clock 4CD54D0793E52FA6)
+11:04:33.493 [D] PTP: first message type 0xB from 127.0.0.1 (clock 4CD54D0793E52FA6): clock 4CD54D0793E52FA6, grandmaster 4CD54D0793E52FA6, priority 128/128, class 6
+11:04:33.492 [D] AirPlay <- SETPEERS rtsp://127.0.0.1/2045718176 (66 bytes)
+11:04:33.494 [D] AirPlay <- SETUP rtsp://127.0.0.1/2045718176 (357 bytes)
+11:04:33.495 [I] AirPlay: Buffered Test is playing to this PC
+STATE client=Buffered Test
+11:04:33.495 [D] PTP: saying hello to clock 4CD54D0793E52FA6 at 127.0.0.1
+11:04:33.495 [D] PTP: first message type 0x8 from 127.0.0.1 (clock 4CD54D0793E52FA6)
+11:04:33.497 [I] AirPlay: buffered stream from Buffered Test (format 0x400000)
+STATE client=Buffered Test
+11:04:33.499 [D] AirPlay <- SET_PARAMETER rtsp://127.0.0.1/2045718176 (19 bytes)
+STATE client=Buffered Test
+11:04:34.339 [D] PTP: first message type 0xC from 127.0.0.1 (clock 4CD54D0793E52FA6)
+11:04:35.004 [D] AirPlay <- SETRATEANCHORTIME rtsp://127.0.0.1/2045718176 (196 bytes)
+STATE client=Buffered Test
+11:04:35.011 [D] player: offset -5877392657 target 512206582 cursor -9223372036854775808 err 0.0 blocks 0 first 0
+11:04:36.029 [D] player: offset -5877362138 target 512251577 cursor 512251564 err 3.1 blocks 86 first 512291132
+ONSET 283.198811
+11:04:37.038 [D] player: offset -5877332677 target 512296115 cursor 512296105 err -3.0 blocks 130 first 512291132
+ONSET 284.198824
+11:04:38.058 [D] player: offset -5877314256 target 512341104 cursor 512341087 err -4.3 blocks 169 first 512296252
+ONSET 285.198122
+11:04:39.071 [D] player: offset -5877304269 target 512385622 cursor 512385628 err -1.4 blocks 169 first 512340284
+ONSET 286.198401
+11:04:40.088 [D] player: offset -5877301929 target 512430588 cursor 512430610 err -1.5 blocks 169 first 512385340
+ONSET 287.198296
+11:04:41.100 [D] player: offset -5877295398 target 512475143 cursor 512475151 err 7.0 blocks 169 first 512430396
+ONSET 288.198713
+11:04:42.121 [D] player: offset -5877293905 target 512520152 cursor 512520133 err -7.7 blocks 169 first 512475452
+ONSET 289.198884
+11:04:43.133 [D] player: offset -5877289207 target 512564670 cursor 512564674 err -1.5 blocks 169 first 512519484
+ONSET 290.198830
+11:04:44.152 [D] player: offset -5877286001 target 512609670 cursor 512609656 err -11.2 blocks 169 first 512564540
+ONSET 291.198679
+11:04:45.171 [D] player: offset -5877283377 target 512654639 cursor 512654638 err -3.0 blocks 169 first 512609596
+ONSET 292.199121
+11:04:46.182 [D] player: offset -5877280814 target 512699176 cursor 512699179 err 1.3 blocks 169 first 512653628
+ONSET 293.198243
+11:04:47.202 [D] player: offset -5877279313 target 512744174 cursor 512744161 err -6.9 blocks 170 first 512698684
+ONSET 294.199035
+11:04:48.210 [D] player: offset -5877278673 target 512788686 cursor 512788702 err -3.4 blocks 169 first 512743740
+ONSET 295.198367
+11:04:49.233 [D] player: offset -5877278715 target 512833706 cursor 512833684 err 2.0 blocks 160 first 512788796
+11:04:49.518 [D] AirPlay <- TEARDOWN rtsp://127.0.0.1/2045718176 (42 bytes)
+STATE client=-

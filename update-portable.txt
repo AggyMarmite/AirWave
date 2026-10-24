@@ -1,0 +1,3 @@
+started 0.4.0 D:\a\_temp\portable\AirWave.exe --tray
+started 0.4.0 D:\a\_temp\portable\AirWave.exe --after-update
+old exe left behind: False

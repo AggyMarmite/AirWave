@@ -1,0 +1,7 @@
+outputs: 1 (Speakers (VB-Audio Virtual Cable))
+capture: running on Speakers (VB-Audio Virtual Cable)
+source list: 2 items, selected 'Default output (follows Windows)', box 'Default output (follows Windows)', vm 'Default output (follows Windows)'
+mDNS speakers seen: 0
+own AirPlay receiver advertised and discovered: True
+update check: latest release 0.4.0 installer=AirWave-Setup-0.4.0.exe (65705247 bytes, sha256 given) portable=AirWave-0.4.0-portable.exe
+PASSED

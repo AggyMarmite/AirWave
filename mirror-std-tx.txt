@@ -1,0 +1,13 @@
+PAIRING needed (NeedsPin): The TV wants this PC paired first
+PAIRED
+11:05:13.778 [I] Mirroring to Test TV: screen 1920x1080, sound off
+OPEN display=(1920, 1080) audio=False
+11:05:13.796 [I] Mirroring: 1024×768 screen → 1024×768 at 30 fps, Windows H.264 encoder
+PIPELINE encoder=Processor (software) fps=30 size=1024×768 :: 1024×768 screen → 1024×768 at 30 fps, Windows H.264 encoder
+11:05:13.833 [I] Mirroring stats: 1 frames, 0 dropped, encode 1.8 ms, capture→sent 0 ms, delay on TV 250 ms, 4.0 Mbit/s
+SCREEN 1024×768 frames=29 encode=22.0ms open=True 
+SCREEN 1024×768 frames=60 encode=23.4ms open=True 
+SCREEN 1024×768 frames=89 encode=26.0ms open=True 
+SCREEN 1024×768 frames=120 encode=23.9ms open=True 
+SCREEN 1024×768 frames=150 encode=25.7ms open=True 
+SCREEN 1024×768 frames=180 encode=23.0ms open=True 
