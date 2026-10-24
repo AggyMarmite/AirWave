@@ -38,10 +38,13 @@ internal static class SelfTest
             {
                 first.SetOffsetSilently(40);
                 first.ShowTiming = true;
-                await Task.Delay(500);
+                await Task.Delay(300);
+                w.SpeakerScroll.ScrollToVerticalOffset(260);
+                await Task.Delay(400);
                 Snap(w, Path.Combine(dir, "11-timing.png"));
                 first.ShowTiming = false;
                 first.SetOffsetSilently(0);
+                w.SpeakerScroll.ScrollToTop();
             }
             if (!app.Controller.NpHasInfo || !app.Controller.NpHasArtwork) { ok = false; notes.Add("now-playing card didn't pick up the demo track/artwork"); }
 
