@@ -14,8 +14,11 @@ def err(o, base, shift):
     k = round(o - base - shift)
     return round((o - (base + k + shift)) * 1000, 1)
 
+mr = re.search(r"RESTREAM monotonic ([\d.]+)", p)
 errs, during_pause = [], []
 for o in on2:
+    if mr and 0 <= o - float(mr.group(1)) < 0.15:
+        continue  # a beep cut short by the stream restart, picked up again as the new stream starts
     if m2 and abs(o - float(m2.group(1))) < 0.12:
         continue  # the rest of a beep that was cut off by the pause, heard as soon as playback resumes
     if m2 and o > float(m2.group(1)) - 0.05:

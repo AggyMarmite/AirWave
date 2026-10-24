@@ -28,11 +28,14 @@ public sealed class MirrorException : Exception
 ///  4. RECORD, optional type-96 screen audio, then a type-110 screen stream giving a data port;
 ///  5. on the data port: avcC codec packets and 128-byte-header H.264 frames sealed with ChaCha20-Poly1305
 ///     under HKDF(pairing secret, "DataStream-Salt"+streamId, "DataStream-Output-Encryption-Key").
-/// Frames are stamped with capture time + <see cref="LatencyMs"/> on the TV's own clock.
+/// Frames are stamped with capture time + <see cref="LatencyMs"/> on the TV's own clock (the TV's playout buffer).
 /// </summary>
 public sealed class MirrorSession : IDisposable
 {
-    public const long LatencyMs = 250;
+    /// <summary>Default playout delay: how far behind capture the TV shows each frame (covers encoding and the network).</summary>
+    public const int DefaultLatencyMs = 250;
+    /// <summary>This session's playout delay.</summary>
+    public long LatencyMs { get; }
     private const string SourceVersion = "980.71.1";
     private const int HeaderSize = 128;
 
@@ -65,9 +68,10 @@ public sealed class MirrorSession : IDisposable
     public event Action<string> Ended;
 
     private MirrorSession(string name, RtspClient rtsp, string url, TcpClient data, byte[] videoKey, ReceiverClock clock,
-        EventsChannel events, ScreenAudio audio, string password, (string, string)? digest, long clockId)
+        EventsChannel events, ScreenAudio audio, string password, (string, string)? digest, long clockId, int latencyMs)
     {
         Name = name;
+        LatencyMs = latencyMs;
         _rtsp = rtsp; _url = url; _data = data; _dataStream = data.GetStream();
         _videoCipher = new ChaCha20Poly1305(videoKey);
         _clock = clock; _events = events; _audio = audio; _password = password; _digest = digest; _clockId = clockId;
@@ -129,8 +133,9 @@ public sealed class MirrorSession : IDisposable
     /// <param name="creds">A stored pairing, or null to try transient pairing (TVs open to everyone).</param>
     /// <param name="password">The TV's AirPlay password, if it has one.</param>
     public static async Task<MirrorSession> OpenAsync(IPEndPoint tv, string tvName, MirrorCredentials creds, string password,
-        string senderName, bool withAudio, CancellationToken ct = default)
+        string senderName, bool withAudio, CancellationToken ct = default, int latencyMs = DefaultLatencyMs)
     {
+        latencyMs = Math.Clamp(latencyMs, 50, 1000);
         var rtsp = await RtspClient.ConnectAsync(tv, 5000, ct);
         EventsChannel events = null;
         ScreenAudio audio = null;
@@ -270,7 +275,7 @@ public sealed class MirrorSession : IDisposable
                 if (screenFormats >= 0 && (screenFormats & 0x40000) == 0) audioProblem = "the TV doesn't take sound with mirroring";
                 else
                 {
-                    try { audio = await ScreenAudio.SetupAsync(Req, url, controlId, tv.Address, clock, () => Interlocked.Read(ref clockId)); }
+                    try { audio = await ScreenAudio.SetupAsync(Req, url, controlId, tv.Address, clock, () => Interlocked.Read(ref clockId), latencyMs); }
                     catch (Exception ex) when (ex is not OperationCanceledException) { audioProblem = ex.Message; }
                 }
             }
@@ -280,7 +285,7 @@ public sealed class MirrorSession : IDisposable
             {
                 ["type"] = 110L,
                 ["streamConnectionID"] = videoId,
-                ["latencyMs"] = LatencyMs,
+                ["latencyMs"] = (long)latencyMs,
                 ["timestampInfo"] = new List<object>(new[] { "SubSu", "BePxT", "AfPxT", "BefEn", "EmEnc" }.Select(n => (object)new Dictionary<string, object> { ["name"] = n })),
                 ["shk"] = ChannelCipher.Derive(secret, "Control-Salt", "Control-Write-Encryption-Key").AsSpan(0, 16).ToArray(),
                 ["shiv"] = ChannelCipher.Derive(secret, "Control-Salt", "Control-Read-Encryption-Key").AsSpan(0, 16).ToArray(),
@@ -292,14 +297,15 @@ public sealed class MirrorSession : IDisposable
             long dataPort = vs?.GetLong("dataPort") ?? 0;
             if (dataPort <= 0) throw new MirrorException(MirrorProblem.Refused, "The TV didn't give a port for the picture");
 
-            data = new TcpClient(tv.AddressFamily) { NoDelay = true, SendBufferSize = 1 << 20 };
+            // A small send buffer: if the network can't keep up we want to know (and drop frames), not queue seconds of video
+            data = new TcpClient(tv.AddressFamily) { NoDelay = true, SendBufferSize = 256 * 1024 };
             await data.ConnectAsync(tv.Address, (int)dataPort, ct);
 
             if (audio != null)
                 for (int i = 0; i < 2; i++) Observe(await Req("SET_PARAMETER", url, Encoding.ASCII.GetBytes("volume: 0.000000\r\n"), "text/parameters"));
 
             var videoKey = ChannelCipher.Derive(secret, "DataStream-Salt" + videoId, "DataStream-Output-Encryption-Key");
-            var session = new MirrorSession(tvName, rtsp, url, data, videoKey, clock, events, audio, password, digest, clockId)
+            var session = new MirrorSession(tvName, rtsp, url, data, videoKey, clock, events, audio, password, digest, clockId, latencyMs)
             {
                 Display = display,
                 AudioProblem = audioProblem,
@@ -408,22 +414,94 @@ public sealed class MirrorSession : IDisposable
         lock (_write) _pendingConfig = header.Concat(avcC).ToArray();
     }
 
+    // ---- picture sending: frames queue here and a writer thread puts them on the network, so a slow
+    // network never holds up capture. Frames that would reach the TV after their display time are
+    // dropped (up to the next keyframe, which is asked for at once) rather than adding delay.
+
+    private sealed record QueuedFrame(byte[] Avcc, bool Keyframe, long CaptureNs);
+    private readonly Queue<QueuedFrame> _queue = new();
+    private readonly SemaphoreSlim _queued = new(0);
+    private Thread _writer;
+    private bool _dropping;
+    private long _lastKeyRequest;
+    /// <summary>Time the TV needs between receiving a frame and showing it (decode and display).</summary>
+    private const long DecodeMarginNs = 20_000_000;
+
+    /// <summary>Raised (on the writer thread) when frames were dropped and the encoder should send a keyframe now.</summary>
+    public event Action KeyframeNeeded;
+    /// <summary>Frames dropped because the network couldn't keep up.</summary>
+    public int FramesDropped => Volatile.Read(ref _framesDropped);
+    private int _framesDropped;
+    /// <summary>How long the last frame waited before going out, ms (a sign of network trouble when it grows).</summary>
+    public double SendDelayMs { get; private set; }
+
     /// <summary>Sends one frame in AVCC form (4-byte big-endian NAL lengths), captured at MonoClock time captureNs.</summary>
     public void SendFrame(ReadOnlySpan<byte> avcc, bool keyframe, long captureNs)
     {
+        if (!IsOpen) throw new IOException("mirroring session is closed");
+        lock (_queue)
+        {
+            if (_writer == null)
+            {
+                _writer = new Thread(WriteLoop) { IsBackground = true, Name = "AirWave mirror send", Priority = ThreadPriority.AboveNormal };
+                _writer.Start();
+            }
+            _queue.Enqueue(new QueuedFrame(avcc.ToArray(), keyframe, captureNs));
+        }
+        _queued.Release();
+    }
+
+    private void WriteLoop()
+    {
+        try
+        {
+            while (IsOpen)
+            {
+                if (!_queued.Wait(500)) continue;
+                QueuedFrame f;
+                lock (_queue) { if (_queue.Count == 0) continue; f = _queue.Dequeue(); }
+                long now = MonoClock.NowNs;
+                long deadline = f.CaptureNs + LatencyMs * 1_000_000 - DecodeMarginNs;
+                if (f.Keyframe) _dropping = false;
+                else if (_dropping || now > deadline)
+                {
+                    // Too late to be shown on time (or we're skipping to the next keyframe): drop it
+                    if (!_dropping) Log.Debug($"Mirroring: network behind by {(now - deadline) / 1_000_000} ms, skipping to the next keyframe");
+                    _dropping = true;
+                    Interlocked.Increment(ref _framesDropped);
+                    if (now - _lastKeyRequest > 400_000_000L) { _lastKeyRequest = now; try { KeyframeNeeded?.Invoke(); } catch { } }
+                    continue;
+                }
+                Write(f);
+                SendDelayMs = SendDelayMs * 0.9 + (MonoClock.NowNs - f.CaptureNs) / 1e6 * 0.1;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or SocketException)
+        {
+            End("the TV stopped taking the picture");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Mirroring send failed: {ex.Message}");
+            End("sending failed");
+        }
+    }
+
+    private void Write(QueuedFrame f)
+    {
         var header = new byte[HeaderSize];
-        BinaryPrimitives.WriteInt32LittleEndian(header, avcc.Length + 16);
+        BinaryPrimitives.WriteInt32LittleEndian(header, f.Avcc.Length + 16);
         header[4] = 0x00;
-        header[5] = keyframe ? (byte)0x10 : (byte)0x00;
+        header[5] = f.Keyframe ? (byte)0x10 : (byte)0x00;
         BinaryPrimitives.WriteInt64LittleEndian(header.AsSpan(40), Interlocked.Read(ref _clockId));
-        var sealedData = new byte[avcc.Length + 16];
+        var sealedData = new byte[f.Avcc.Length + 16];
         lock (_write)
         {
             if (!IsOpen) throw new IOException("mirroring session is closed");
-            long ts = Math.Max(ReceiverClock.ToFixed32(_clock.ReceiverNs(captureNs) + LatencyMs * 1_000_000), _lastTs);
+            long ts = Math.Max(ReceiverClock.ToFixed32(_clock.ReceiverNs(f.CaptureNs) + LatencyMs * 1_000_000), _lastTs);
             _lastTs = ts;
             BinaryPrimitives.WriteInt64LittleEndian(header.AsSpan(8), ts);
-            if (keyframe && _pendingConfig != null)
+            if (f.Keyframe && _pendingConfig != null)
             {
                 BinaryPrimitives.WriteInt64LittleEndian(_pendingConfig.AsSpan(8), ts);
                 _dataStream.Write(_pendingConfig);
@@ -432,7 +510,7 @@ public sealed class MirrorSession : IDisposable
             Span<byte> nonce = stackalloc byte[12];
             nonce.Clear();
             BinaryPrimitives.WriteUInt64LittleEndian(nonce[4..], _nonce++);
-            _videoCipher.Encrypt(nonce, avcc, sealedData.AsSpan(0, avcc.Length), sealedData.AsSpan(avcc.Length, 16), header);
+            _videoCipher.Encrypt(nonce, f.Avcc, sealedData.AsSpan(0, f.Avcc.Length), sealedData.AsSpan(f.Avcc.Length, 16), header);
             _dataStream.Write(header);
             _dataStream.Write(sealedData);
             _firstFrameSent = true;
@@ -485,7 +563,7 @@ public sealed class MirrorSession : IDisposable
     {
         public const int Frames = 352;
         private const int Rate = 44100;
-        private static readonly long LatencySamples = LatencyMs * Rate / 1000;
+        private readonly long LatencySamples;
         private readonly IPEndPoint _dataEp, _controlEp;
         private readonly Socket _dataSock, _controlSock;
         private readonly ChaCha20Poly1305 _cipher;
@@ -500,8 +578,9 @@ public sealed class MirrorSession : IDisposable
         private long _lastSync = long.MinValue, _expected = long.MinValue;
         private readonly byte[] _enc = new byte[AlacEncoder.MaxSize(Frames)];
 
-        private ScreenAudio(IPAddress host, int dataPort, int controlPort, Socket control, byte[] key, ReceiverClock clock, Func<long> clockId)
+        private ScreenAudio(IPAddress host, int dataPort, int controlPort, Socket control, byte[] key, ReceiverClock clock, Func<long> clockId, long latencySamples)
         {
+            LatencySamples = latencySamples;
             _dataEp = new IPEndPoint(host, dataPort);
             _controlEp = new IPEndPoint(host, controlPort);
             _controlSock = control;
@@ -513,8 +592,9 @@ public sealed class MirrorSession : IDisposable
         }
 
         public static async Task<ScreenAudio> SetupAsync(Func<string, string, byte[], string, Dictionary<string, string>, Task<RtspResponse>> req,
-            string url, long streamId, IPAddress host, ReceiverClock clock, Func<long> clockId)
+            string url, long streamId, IPAddress host, ReceiverClock clock, Func<long> clockId, int latencyMs)
         {
+            long LatencySamples = latencyMs * (long)Rate / 1000;
             var control = new Socket(host.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
             control.Bind(new IPEndPoint(host.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
             int localControl = ((IPEndPoint)control.LocalEndPoint).Port;
@@ -555,7 +635,7 @@ public sealed class MirrorSession : IDisposable
                     if (P("streamConnectionTypeRTCP") is long p2 && p2 > 0) ctrlPort = p2;
                 }
                 if (dataPort <= 0 || ctrlPort <= 0) throw new MirrorException(MirrorProblem.Refused, "no sound ports in the TV's reply");
-                return new ScreenAudio(host, (int)dataPort, (int)ctrlPort, control, key, clock, clockId);
+                return new ScreenAudio(host, (int)dataPort, (int)ctrlPort, control, key, clock, clockId, LatencySamples);
             }
             catch { control.Dispose(); throw; }
         }

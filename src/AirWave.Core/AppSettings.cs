@@ -17,6 +17,7 @@ public sealed class AppSettings
     public bool StartMinimised { get; set; }
     public bool CloseToTray { get; set; } = true;
     public bool AutoCheckUpdates { get; set; } = true;
+    public bool DetailedLogging { get; set; }
     public List<ManualSpeaker> ManualSpeakers { get; set; } = new();
     public bool ForceNtp { get; set; }
 
@@ -27,7 +28,8 @@ public sealed class AppSettings
 
     // Screen mirroring
     public bool MirrorWithSound { get; set; } = true;
-    public bool UseGpuEncoder { get; set; } = true;      // graphics card capture + encoder: full resolution, 60 fps
+    public bool UseGpuEncoder { get; set; } = true;
+    public int MirrorDelayMs { get; set; } = 120;        // how far behind the PC the TV shows the picture      // graphics card capture + encoder: full resolution, 60 fps
 
     public sealed class ManualSpeaker
     {

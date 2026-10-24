@@ -90,13 +90,34 @@ internal sealed class GpuConverter : IDisposable
         return t;
     }
 
-    /// <summary>Converts the current screen texture. The returned sample (NV12 on the card) is the caller's to release.</summary>
+    private const int MF_E_NOTACCEPTING = unchecked((int)0xC00D36B5), MF_E_TRANSFORM_NEED_MORE_INPUT = unchecked((int)0xC00D6D72);
+
+    /// <summary>
+    /// Converts the current screen texture. The returned sample (NV12 on the card) is the caller's to release;
+    /// null if the converter had nothing to give yet.
+    /// </summary>
     public IMFSample Convert(long time100ns, long duration100ns)
     {
         _inSample.SetSampleTime(time100ns);
         _inSample.SetSampleDuration(duration100ns);
-        Mf.Check(_vp.ProcessInput(0, _inSample, 0), "convert the screen");
+        int hr = _vp.ProcessInput(0, _inSample, 0);
+        if (hr == MF_E_NOTACCEPTING)
+        {
+            // Some drivers' converters hold on to a frame: collect what's waiting, then try again
+            for (int i = 0; i < 4; i++)
+            {
+                var old = TakeOutput(time100ns, duration100ns);
+                if (old == null) break;
+                Marshal.ReleaseComObject(old);
+            }
+            hr = _vp.ProcessInput(0, _inSample, 0);
+        }
+        Mf.Check(hr, "convert the screen");
+        return TakeOutput(time100ns, duration100ns);
+    }
 
+    private IMFSample TakeOutput(long time100ns, long duration100ns)
+    {
         IMFSample outSample = null;
         IMFMediaBuffer outBuf = null;
         if (!_providesSamples)
@@ -112,16 +133,21 @@ internal sealed class GpuConverter : IDisposable
         if (odb.pEvents != IntPtr.Zero) Marshal.Release(odb.pEvents);
         try
         {
+            if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) { if (outSample != null) Marshal.ReleaseComObject(outSample); return null; }
             Mf.Check(hr, "convert the screen (output)");
             var s = (IMFSample)Marshal.GetObjectForIUnknown(odb.pSample);
             s.SetSampleTime(time100ns);
             s.SetSampleDuration(duration100ns);
             return s;
         }
+        catch
+        {
+            if (outSample != null) Marshal.ReleaseComObject(outSample);
+            throw;
+        }
         finally
         {
             if (odb.pSample != IntPtr.Zero) Marshal.Release(odb.pSample);
-            if (outSample != null && hr < 0) Marshal.ReleaseComObject(outSample);
         }
     }
 

@@ -147,7 +147,9 @@ public abstract class CapturedSource : IAudioSource
 {
     protected readonly Resampler Resampler = new();
     protected readonly PcmRing Ring = new(44100 * 2 * 2); // 2 s
-    private const int TargetFrames = 44100 * 100 / 1000;  // aim to hold ~100 ms
+    private int TargetFrames = 44100 * 100 / 1000;  // aim to hold ~100 ms
+    /// <summary>How much audio to keep in hand, ms. Less means lower delay but more risk of gaps (screen mirroring uses less).</summary>
+    public int CushionMs { get => TargetFrames * 1000 / 44100; set => TargetFrames = Math.Clamp(value, 20, 500) * 44100 / 1000; }
     private bool _primed;
     private float _level;
     public float Level => _level;

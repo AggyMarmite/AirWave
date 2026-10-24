@@ -35,3 +35,27 @@ for mode in open pin password; do
   if [[ $same != yes ]] || ! grep -q "bad=0" <<< "$audio" || grep -q "^ERR" tv-$mode.log; then fail=1; echo "--- tx"; tail -5 tx-$mode.log; echo "--- tv"; tail -8 tv-$mode.log; fi
 done
 [[ $fail == 0 ]] && echo "PASS: screen mirroring protocol (open, PIN and password TVs)" || { echo "FAIL"; exit 1; }
+
+# Lowest picture delay (120 ms): still frame-for-frame, nothing late
+port=$((port+1)); rm -rf pair-low out-low.h264
+$CLI mock-tv --mode open --port $port --out out-low.h264 --seconds 25 > tv-low.log 2>&1 & TV=$!
+sleep 1.5
+$CLI mirror-test 127.0.0.1:$port --h264 in.h264 --audio --latency 120 --pair-dir pair-low > tx-low.log 2>&1 || true
+sleep 1; kill $TV 2>/dev/null || true; wait $TV 2>/dev/null || true
+ffmpeg -hide_banner -loglevel error -y -i out-low.h264 -f framemd5 out-low.md5 2>/dev/null || true
+same=$(diff <(grep '^0,' in.md5 | awk -F, '{print $6}') <(grep '^0,' out-low.md5 | awk -F, '{print $6}') > /dev/null && echo yes || echo no)
+echo "low delay: identical=$same, $(grep -o 'lead=-\?[0-9]*ms' tv-low.log | tail -1), $(grep VIDEO tv-low.log | grep late | sed 's/VIDEO //')"
+[[ $same == yes ]] && grep -q "late=0 " tv-low.log || { echo "FAIL: low delay"; tail -5 tv-low.log; exit 1; }
+
+# A network too slow for the picture: frames that would be late are skipped up to the next keyframe,
+# so the delay stays put and the picture never breaks up
+kbps=$(( $(stat -c %s in.h264) * 8 / 6 / 1000 * 6 / 10 ))
+port=$((port+1)); rm -rf pair-slow out-slow.h264
+$CLI mock-tv --mode open --port $port --out out-slow.h264 --seconds 25 --throttle-kbps $kbps > tv-slow.log 2>&1 & TV=$!
+sleep 1.5
+$CLI mirror-test 127.0.0.1:$port --h264 in.h264 --latency 120 --pair-dir pair-slow > tx-slow.log 2>&1 || true
+sleep 1; kill $TV 2>/dev/null || true; wait $TV 2>/dev/null || true
+errs=$(ffmpeg -hide_banner -v error -i out-slow.h264 -f null - 2>&1 | wc -l)
+echo "slow network ($kbps kbit/s): $(grep -o 'dropped=[0-9]*' tx-slow.log), $(grep VIDEO tv-slow.log | grep late | sed 's/VIDEO //'), decode errors=$errs"
+grep -q "gaps_without_keyframe=0" tv-slow.log && ! grep -q "dropped=0" tx-slow.log && [[ $errs == 0 ]] && ! grep -q "^ERR" tv-slow.log \
+  && echo "PASS: picture delay setting, and skipping late frames on a slow network" || { echo "FAIL: slow network"; tail -5 tx-slow.log; tail -5 tv-slow.log; exit 1; }

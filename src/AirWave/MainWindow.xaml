@@ -524,6 +524,15 @@
                                 </StackPanel>
                             </CheckBox>
                             <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
+                            <TextBlock Text="Picture delay" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <ComboBox SelectedIndex="{Binding MirrorDelayIndex, Mode=TwoWay}">
+                                <ComboBoxItem Content="Lowest (about 0.1 s) – best for using the PC on the TV"/>
+                                <ComboBoxItem Content="Balanced (about 0.2 s)"/>
+                                <ComboBoxItem Content="Smoothest (about 0.4 s) – best for weak Wi-Fi and video"/>
+                            </ComboBox>
+                            <TextBlock Style="{StaticResource Muted}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                       Text="How far behind the PC the TV shows the picture. If it stutters or skips, choose a longer delay. Applies next time you mirror."/>
+                            <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
                             <CheckBox x:Name="GpuEncoderSwitch" Style="{StaticResource Switch}" IsChecked="{Binding UseGpuEncoder, Mode=TwoWay}">
                                 <StackPanel>
                                     <TextBlock Text="Use the graphics card encoder" FontWeight="SemiBold"/>
@@ -590,6 +599,13 @@
                     <TextBlock Text="TROUBLESHOOTING" Style="{StaticResource Section}" Margin="4,18,0,8"/>
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding DetailedLogging, Mode=TwoWay}">
+                                <StackPanel>
+                                    <TextBlock Text="Detailed diagnostics" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap" Text="Records everything speakers, TVs and phones say to AirWave. Turn on, try again, then Copy diagnostics."/>
+                                </StackPanel>
+                            </CheckBox>
+                            <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ForceNtp, Mode=TwoWay}">
                                 <StackPanel>
                                     <TextBlock Text="Use older timing (NTP) for every speaker" FontWeight="SemiBold"/>

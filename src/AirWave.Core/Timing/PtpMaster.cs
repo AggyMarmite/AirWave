@@ -32,10 +32,62 @@ public sealed class PtpMaster : IDisposable
     public bool IsRunning { get; }
     public string Error { get; }
 
+    // Diagnostics: what each other device has sent our PTP ports
+    private sealed class Seen { public int DelayReq, PdelayReq, Announce, Sync, FollowUp, Signaling, Other; public string LastAnnounce; }
+    private readonly ConcurrentDictionary<IPAddress, Seen> _seen = new();
+
+    /// <summary>A one-line summary of the PTP messages a device has sent us (for diagnostics).</summary>
+    public string DescribePeer(IPAddress a)
+    {
+        if (a.IsIPv4MappedToIPv6) a = a.MapToIPv4();
+        if (!_seen.TryGetValue(a, out var s)) return "no PTP messages from it";
+        return $"Delay_Req {s.DelayReq}, Pdelay_Req {s.PdelayReq}, Announce {s.Announce}{(s.LastAnnounce != null ? $" ({s.LastAnnounce})" : "")}, Sync {s.Sync}, Follow_Up {s.FollowUp}, Signaling {s.Signaling}, other {s.Other}";
+    }
+
+    public bool IsPeer(IPAddress a)
+    {
+        if (a.IsIPv4MappedToIPv6) a = a.MapToIPv4();
+        foreach (var p in _peers.Values) if (p.Address.Equals(a)) return true;
+        return false;
+    }
+
+    private void Count(IPAddress from, byte[] msg)
+    {
+        var s = _seen.GetOrAdd(from, _ => new Seen());
+        int type = msg[0] & 0x0f;
+        int n = type switch
+        {
+            0x01 => ++s.DelayReq, 0x02 => ++s.PdelayReq, 0x0B => ++s.Announce, 0x00 => ++s.Sync, 0x08 => ++s.FollowUp, 0x0C => ++s.Signaling, _ => ++s.Other,
+        };
+        if (type == 0x0B && msg.Length >= 64)
+            s.LastAnnounce = $"clock {BinaryPrimitives.ReadUInt64BigEndian(msg.AsSpan(20)):X16}, grandmaster {BinaryPrimitives.ReadUInt64BigEndian(msg.AsSpan(53)):X16}, priority {msg[47]}/{msg[52]}, class {msg[48]}";
+        if (n == 1 && Log.MinLevel <= LogLevel.Debug)
+            Log.Debug($"PTP: first message type 0x{type:X} from {from} (clock {BinaryPrimitives.ReadUInt64BigEndian(msg.AsSpan(20)):X16}){(type == 0x0B ? ": " + s.LastAnnounce : "")}");
+    }
+
     private sealed class Peer
     {
         public IPAddress Address;
         public DateTime LastSeen;
+        public bool HelloSeen;
+    }
+
+    /// <summary>
+    /// Behave like an Apple device that has just become the timekeeper: announce to peers, but only send them
+    /// time (Sync/Follow_Up) once they've said hello (<see cref="MarkHello"/>). Used by tests.
+    /// </summary>
+    public bool SilentUntilHello { get; set; }
+
+    public void MarkHello(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        foreach (var p in _peers.Values) if (p.Address.Equals(address)) p.HelloSeen = true;
+    }
+
+    public void RemovePeer(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        foreach (var kv in _peers) if (kv.Value.Address.Equals(address)) _peers.TryRemove(kv.Key, out _);
     }
 
     /// <param name="standardPorts">false = send from any free ports (lets a test sender run beside a receiver on one PC).</param>
@@ -77,6 +129,14 @@ public sealed class PtpMaster : IDisposable
     }
 
     public void RemovePeer(int id) => _peers.TryRemove(id, out _);
+
+    /// <summary>Sends a message from our general (320) port to another clock.</summary>
+    public void SendGeneral(IPAddress address, byte[] msg)
+    {
+        if (!IsRunning) return;
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        SendTo(_general, address, GeneralPort, msg);
+    }
 
     // ---------------------------------------------------------------- loops
 
@@ -120,6 +180,7 @@ public sealed class PtpMaster : IDisposable
             var msg = r.Buffer;
             if (msg.Length < 34) continue;
             int type = msg[0] & 0x0f;
+            if (BinaryPrimitives.ReadUInt64BigEndian(msg.AsSpan(20)) != ClockId) Count(from.Address, msg);
             switch (type)
             {
                 case 0x01: // Delay_Req -> Delay_Resp on the general port
@@ -144,9 +205,11 @@ public sealed class PtpMaster : IDisposable
     private void SendAll(UdpClient udp, int port, byte[] msg)
     {
         var now = DateTime.UtcNow;
+        bool announce = (msg[0] & 0x0f) == 0x0B;
         foreach (var p in _peers.Values)
         {
             if ((now - p.LastSeen).TotalSeconds > StaleSeconds) continue;
+            if (SilentUntilHello && !p.HelloSeen && !announce) continue;
             SendTo(udp, p.Address, port, msg);
         }
     }
@@ -196,6 +259,7 @@ public sealed class PtpMaster : IDisposable
         var sync = new byte[44];
         Header(sync, 0x00, seq, -3, 0x0608);
         long ts = MonoClock.NowNs;
+        WriteTimestamp(sync.AsSpan(34), ts); // approximate (two-step: Follow_Up has the precise one), as OwnTone does
         SendAll(_event, EventPort, sync);
 
         var fu = new byte[96];

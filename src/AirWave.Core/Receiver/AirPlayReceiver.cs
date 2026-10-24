@@ -146,7 +146,9 @@ public sealed class AirPlayReceiver : IAsyncDisposable
             ActiveStream = conn;
             ActiveClient = conn == null ? null : (clientName ?? "an AirPlay device");
         }
-        if (previous != null && !ReferenceEquals(previous, conn))
+        // Only a *different* connection starting a stream takes over. A stream ending (conn == null) leaves the
+        // connection open: senders end one stream and start another on it, e.g. when a speaker joins the group.
+        if (conn != null && previous != null && !ReferenceEquals(previous, conn))
         {
             Log.Info("AirPlay: another device took over");
             previous.Dispose();
@@ -158,6 +160,12 @@ public sealed class AirPlayReceiver : IAsyncDisposable
     }
 
     internal void RaiseStateChanged() => StateChanged?.Invoke();
+
+    /// <summary>A connection's stream ended: clear it if it's the one playing (another may already have taken over).</summary>
+    internal void StreamEnded(RtspConnection conn)
+    {
+        if (ReferenceEquals(ActiveStream, conn)) SetActive(null, null);
+    }
 
     /// <summary>Title, artist, artwork etc. of what's playing to us now (null when nothing is).</summary>
     public NowPlaying NowPlaying => ActiveStream?.NowPlaying;

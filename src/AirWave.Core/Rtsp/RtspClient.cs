@@ -90,7 +90,14 @@ public sealed class RtspClient : IDisposable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(timeoutMs);
             await _stream.WriteAsync(wire, cts.Token);
-            return await ReadResponseAsync(cts.Token);
+            var resp = await ReadResponseAsync(cts.Token);
+            if (Log.MinLevel <= LogLevel.Debug)
+            {
+                string path = uri.StartsWith("rtsp://") ? uri[(uri.IndexOf('/', 7) is int i && i > 0 ? i : 0)..] : uri;
+                string sent = body != null && body.Length > 0 && method != "POST" ? " " + Plist.PlistText.DescribeBody(body, 400) : "";
+                Log.Debug($"RTSP {Remote.Address} {method} {path}{sent} -> {resp.Status} {Plist.PlistText.DescribeBody(resp.Body, 500)}");
+            }
+            return resp;
         }
         finally
         {

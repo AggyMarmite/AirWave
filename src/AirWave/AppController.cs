@@ -53,6 +53,7 @@ public sealed class AppController : Observable, IAsyncDisposable
     {
         _ui = ui;
         Settings = AppSettings.Load();
+        if (Settings.DetailedLogging) Log.MinLevel = LogLevel.Debug;
         _masterVolume = Settings.MasterVolume;
 
         _engine = new StreamEngine
@@ -707,6 +708,13 @@ public sealed class AppController : Observable, IAsyncDisposable
         set { Settings.MirrorWithSound = value; Settings.Save(); Raise(); }
     }
 
+    /// <summary>0 = lowest delay, 1 = balanced, 2 = smoothest.</summary>
+    public int MirrorDelayIndex
+    {
+        get => Settings.MirrorDelayMs <= 150 ? 0 : Settings.MirrorDelayMs <= 250 ? 1 : 2;
+        set { Settings.MirrorDelayMs = value switch { 0 => 120, 1 => 220, _ => 400 }; Settings.Save(); Raise(); }
+    }
+
     public bool UseGpuEncoder
     {
         get => Settings.UseGpuEncoder;
@@ -745,7 +753,8 @@ public sealed class AppController : Observable, IAsyncDisposable
                 cts.Token.ThrowIfCancellationRequested();
                 try
                 {
-                    session = await Task.Run(() => MirrorSession.OpenAsync(ep, vm.Name, creds, password, me, withSound, cts.Token), cts.Token);
+                    int delay = Settings.MirrorDelayMs;
+                    session = await Task.Run(() => MirrorSession.OpenAsync(ep, vm.Name, creds, password, me, withSound, cts.Token, delay), cts.Token);
                 }
                 catch (MirrorException ex) when (attempt < 3 && ex.Problem is MirrorProblem.NeedsPin or MirrorProblem.PairingLost or MirrorProblem.NeedsPassword or MirrorProblem.WrongPassword)
                 {
@@ -968,6 +977,13 @@ public sealed class AppController : Observable, IAsyncDisposable
 
     /// <summary>Asks the app to close so the update can be put in place.</summary>
     public event Action QuitForUpdate;
+
+    /// <summary>Writes much more detail to the log (what speakers and phones say), for working out problems.</summary>
+    public bool DetailedLogging
+    {
+        get => Settings.DetailedLogging;
+        set { Settings.DetailedLogging = value; Settings.Save(); Log.MinLevel = value ? LogLevel.Debug : LogLevel.Info; Log.Info($"Detailed logging {(value ? "on" : "off")}"); Raise(); }
+    }
 
     public bool AutoCheckUpdates
     {

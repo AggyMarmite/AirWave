@@ -114,6 +114,9 @@ public sealed unsafe class H264Encoder : IDisposable
     }
 
     public void ForceKeyframe() => TrySet(CODECAPI_AVEncVideoForceKeyFrame, 1u);
+    private static readonly Guid CODECAPI_AVEncCommonMeanBitRate = new("f7222374-2144-4815-b550-a37f8e12ee52");
+    /// <summary>Changes the bitrate while encoding (to suit the network).</summary>
+    public void SetBitrate(int bps) => TrySet(CODECAPI_AVEncCommonMeanBitRate, (uint)bps);
 
     /// <summary>Encodes one BGRA frame; returns the access units that came out (usually one, sometimes none at first).</summary>
     public List<H264.AccessUnit> Encode(IntPtr bgra)

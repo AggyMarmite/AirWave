@@ -17,6 +17,10 @@ internal interface IMirrorPipeline : IDisposable
     bool Broken { get; }
     event Action<H264.AccessUnit, long> Output;
     void Tick(long captureNs);
+    /// <summary>Bitrate the encoder started with (the most the network adaptation will go back up to).</summary>
+    int MaxBitrate { get; }
+    void ForceKeyframe();
+    void SetBitrate(int bps);
 }
 
 internal static class MirrorSizes
@@ -45,11 +49,16 @@ internal sealed class SoftwarePipeline : IMirrorPipeline
     public bool Broken => false;
     public event Action<H264.AccessUnit, long> Output;
 
+    public int MaxBitrate { get; }
+    public void ForceKeyframe() => _enc.ForceKeyframe();
+    public void SetBitrate(int bps) => _enc.SetBitrate(bps);
+
     public SoftwarePipeline(int maxW, int maxH, int fps = 30)
     {
         Fps = fps;
         _cap = new ScreenCapture(Math.Min(maxW, 1920), Math.Min(maxH, 1080));
-        _enc = new H264Encoder(_cap.Width, _cap.Height, fps, MirrorSizes.Bitrate(_cap.Width, _cap.Height, fps));
+        MaxBitrate = MirrorSizes.Bitrate(_cap.Width, _cap.Height, fps);
+        _enc = new H264Encoder(_cap.Width, _cap.Height, fps, MaxBitrate);
         Description = $"{_cap.SourceWidth}×{_cap.SourceHeight} screen → {Width}×{Height} at {fps} fps, {_enc.Name}";
     }
 
@@ -82,6 +91,9 @@ internal sealed unsafe class GpuPipeline : IMirrorPipeline
     public int Fps { get; }
     public bool Broken => _broken;
     public event Action<H264.AccessUnit, long> Output;
+    public int MaxBitrate { get; }
+    public void ForceKeyframe() { if (_hw != null) _hw.ForceKeyframe(); else _sw?.ForceKeyframe(); }
+    public void SetBitrate(int bps) { if (_hw != null) _hw.SetBitrate(bps); else _sw?.SetBitrate(bps); }
 
     public GpuPipeline(int maxW, int maxH, bool hardwareEncoder)
     {
@@ -100,6 +112,7 @@ internal sealed unsafe class GpuPipeline : IMirrorPipeline
                     {
                         _conv ??= new GpuConverter(_dup, _manager, w, h, 60);
                         _hw = new HardwareH264Encoder(a, _manager, w, h, 60, MirrorSizes.Bitrate(w, h, 60));
+                        MaxBitrate = MirrorSizes.Bitrate(w, h, 60);
                         break;
                     }
                     catch (Exception ex) { Log.Info($"Graphics card encoder {MfGpu.FriendlyName(a)} not usable: {ex.Message}"); }
@@ -119,7 +132,8 @@ internal sealed unsafe class GpuPipeline : IMirrorPipeline
                 Fps = 30;
                 var (w, h) = MirrorSizes.Fit(_dup.Width, _dup.Height, Math.Min(maxW, 1920), Math.Min(maxH, 1080));
                 if (_conv == null || _conv.Width != w || _conv.Height != h) { _conv?.Dispose(); _conv = new GpuConverter(_dup, _manager, w, h, 30); }
-                _sw = new H264Encoder(w, h, 30, MirrorSizes.Bitrate(w, h, 30));
+                MaxBitrate = MirrorSizes.Bitrate(w, h, 30);
+                _sw = new H264Encoder(w, h, 30, MaxBitrate);
                 EncoderKind = "Processor (software)";
                 Description = $"{_dup.Width}×{_dup.Height} screen → {Width}×{Height} at 30 fps, {_sw.Name} (no graphics card encoder found)";
             }
@@ -138,6 +152,7 @@ internal sealed unsafe class GpuPipeline : IMirrorPipeline
         {
             if (!_dup.Capture(0)) return;
             var sample = _conv.Convert(captureNs / 100, 10_000_000L / Fps);
+            if (sample == null) return;
             try
             {
                 if (_hw != null) _hw.Submit(sample);

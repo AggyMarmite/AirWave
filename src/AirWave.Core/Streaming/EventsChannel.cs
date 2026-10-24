@@ -53,6 +53,7 @@ internal sealed class EventsChannel : IDisposable
                     int cseq = 0;
                     foreach (var line in head.Split("\r\n"))
                         if (line.StartsWith("CSeq:", StringComparison.OrdinalIgnoreCase)) int.TryParse(line[5..].Trim(), out cseq);
+                    if (Log.MinLevel <= LogLevel.Debug) Log.Debug($"{_name}: event {head.Split("\r\n")[0]} {Plist.PlistText.DescribeBody(body, 500)}");
                     TryRaiseCommand(body);
                     var resp = $"RTSP/1.0 200 OK\r\nServer: AirWave/1.0\r\n" + (cseq > 0 ? $"CSeq: {cseq}\r\n" : "") + "\r\n";
                     await s.WriteAsync(_cipher.Encrypt(Encoding.ASCII.GetBytes(resp)), _cts.Token);

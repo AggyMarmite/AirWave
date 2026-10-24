@@ -94,6 +94,14 @@ static class SendBufferedCommand
         // Feed frames, staying up to 3 s ahead of playback. Optionally pause like an iPhone does
         // (rate 0 + flush of everything not yet played), then resume from where it stopped with a new anchor.
         int pauseAt = int.Parse(Arg(args, "--pause-at") ?? "0");
+        // --gm-switch-at N: N s in, hand timekeeping to another clock, as when a HomePod joins an iPhone's group and
+        // becomes the PTP grandmaster. Like an Apple device it only sends its time to receivers that say hello first.
+        int gmSwitchAt = int.Parse(Arg(args, "--gm-switch-at") ?? "0");
+        // --restream-at N: end the stream and start a fresh one on the same connection (iOS does this when a speaker joins)
+        int restreamAt = int.Parse(Arg(args, "--restream-at") ?? "0");
+        bool restreamed = restreamAt == 0;
+        PtpMaster gm2 = null;
+        bool switched = gmSwitchAt == 0;
         bool paused = pauseAt == 0;
         uint seq = (uint)RandomNumberGenerator.GetInt32(1 << 20);
         long endNs = anchorNs + seconds * 1_000_000_000L;
@@ -119,6 +127,27 @@ static class SendBufferedCommand
                 double mono2 = (anchorNs - MonoClock.NowNs) / 1e9 + System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
                 Console.WriteLine($"ANCHOR2 monotonic {mono2:F6} offset {(skip * 1024) % 44100}");
                 endNs = anchorNs + (seconds - pauseAt) * 1_000_000_000L;
+            }
+            if (!switched && MonoClock.NowNs > anchorNs + gmSwitchAt * 1_000_000_000L)
+            {
+                switched = true;
+                gm2 = new PtpMaster(standardPorts: false) { SilentUntilHello = true };
+                ptp.ForeignMessage += (m, _, from) => { if ((m[0] & 0x0f) == 0x0B) { gm2.MarkHello(from); } };
+                foreach (var s in sessions) { gm2.AddPeer(s.Target.Address); ptp.RemovePeer(s.Target.Address); }
+                // Same timebase (both clocks are MonoClock), so the same anchor, now on the new clock's timeline
+                foreach (var s in sessions) await s.AnchorAsync(rtp0, anchorNs, gm2.ClockId);
+                Console.WriteLine($"SWITCH monotonic {System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency:F6} to clock {gm2.ClockId:X16}");
+            }
+            if (!restreamed && MonoClock.NowNs > anchorNs + restreamAt * 1_000_000_000L)
+            {
+                restreamed = true;
+                foreach (var s in sessions) await s.RestreamAsync();
+                foreach (var s in sessions) await s.AnchorAsync(rtp0, anchorNs, gm2?.ClockId ?? ptp.ClockId);
+                Console.WriteLine($"RESTREAM monotonic {System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency:F6}");
+                // The old stream's buffered audio went with it: resend from what's due now, as iOS does
+                int now_i = (int)((MonoClock.NowNs - anchorNs) / 1e9 * 44100 / 1024) + 1;
+                seq = (uint)((seq - (uint)(i - now_i)) & 0x7fffff);
+                i = now_i;
             }
             var f = frames[i % frames.Count];
             uint rtp = rtp0 + (uint)(i * 1024);
@@ -199,21 +228,36 @@ static class SendBufferedCommand
             await s._rtsp.SendAsync("RECORD", s._url, ct: ct);
             await s._rtsp.SendAsync("SETPEERS", s._url, BinaryPlist.Write(new List<object> { target.Address.ToString(), local.ToString() }), "/peer-list-changed", ct: ct);
 
+            await s.SetupStreamAsync(key);
+            await s._rtsp.SendAsync("SET_PARAMETER", s._url, System.Text.Encoding.ASCII.GetBytes("volume: -5.000000\r\n"), "text/parameters", ct: ct);
+            return s;
+        }
+
+        async Task SetupStreamAsync(byte[] key)
+        {
             var stream = new Dictionary<string, object>
             {
                 ["audioFormat"] = 0x400000L, ["audioMode"] = "default", ["controlPort"] = 0L, ["ct"] = 4L, ["isMedia"] = true,
                 ["shk"] = key, ["spf"] = 1024L, ["sr"] = 44100L, ["type"] = 103L, ["supportsDynamicStreamID"] = true,
                 ["streamConnectionID"] = (long)RandomNumberGenerator.GetInt32(int.MaxValue), ["clientID"] = Guid.NewGuid().ToString(),
             };
-            var rst = await s._rtsp.SendAsync("SETUP", s._url, BinaryPlist.Write(new Dictionary<string, object> { ["streams"] = new List<object> { stream } }), "application/x-apple-binary-plist", ct: ct);
+            var rst = await _rtsp.SendAsync("SETUP", _url, BinaryPlist.Write(new Dictionary<string, object> { ["streams"] = new List<object> { stream } }), "application/x-apple-binary-plist");
             if (!rst.Ok) throw new Exception($"stream SETUP {rst}");
             var st = ((BinaryPlist.Read(rst.Body) as Dictionary<string, object>)["streams"] as List<object>)[0] as Dictionary<string, object>;
             int dataPort = (int)st.GetLong("dataPort");
-            s._dataTcp = new TcpClient(target.AddressFamily) { NoDelay = true };
-            await s._dataTcp.ConnectAsync(target.Address, dataPort);
-            s._data = s._dataTcp.GetStream();
-            await s._rtsp.SendAsync("SET_PARAMETER", s._url, System.Text.Encoding.ASCII.GetBytes("volume: -5.000000\r\n"), "text/parameters", ct: ct);
-            return s;
+            _audio = new ChaCha20Poly1305(key);
+            _dataTcp = new TcpClient(Target.AddressFamily) { NoDelay = true };
+            await _dataTcp.ConnectAsync(Target.Address, dataPort);
+            _data = _dataTcp.GetStream();
+        }
+
+        /// <summary>Ends the stream and starts a new one on the same connection, as iOS does when the group changes.</summary>
+        public async Task RestreamAsync()
+        {
+            var r = await _rtsp.SendAsync("TEARDOWN", _url, BinaryPlist.Write(new Dictionary<string, object> { ["streams"] = new List<object> { new Dictionary<string, object> { ["type"] = 103L } } }), "application/x-apple-binary-plist");
+            if (!r.Ok) Console.WriteLine($"ERR stream teardown {Target}: {r}");
+            try { _dataTcp.Dispose(); } catch { }
+            await SetupStreamAsync(RandomNumberGenerator.GetBytes(32));
         }
 
         public async Task AnchorAsync(uint rtp, long ns, ulong clockId)

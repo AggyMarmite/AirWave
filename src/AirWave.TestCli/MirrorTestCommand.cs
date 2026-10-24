@@ -24,7 +24,7 @@ static class MirrorTestCommand
         {
             try
             {
-                session = await MirrorSession.OpenAsync(tv, "Test TV", creds, password, "AirWave Test", args.Contains("--audio"));
+                session = await MirrorSession.OpenAsync(tv, "Test TV", creds, password, "AirWave Test", args.Contains("--audio"), default, int.Parse(Arg(args, "--latency") ?? MirrorSession.DefaultLatencyMs.ToString()));
             }
             catch (MirrorException ex) when (ex.Problem is MirrorProblem.NeedsPin or MirrorProblem.NeedsPassword or MirrorProblem.PairingLost && attempt == 0)
             {
@@ -86,7 +86,7 @@ static class MirrorTestCommand
             session.SendFrame(au.Avcc, au.Keyframe, due);
         }
         await Task.Delay(1500);
-        Console.WriteLine($"SENT {aus.Count} frames, open={session.IsOpen}");
+        Console.WriteLine($"SENT {aus.Count} frames, dropped={session.FramesDropped}, open={session.IsOpen}");
         session.Dispose();
         return 0;
     }

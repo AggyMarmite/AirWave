@@ -32,6 +32,8 @@ public sealed class StreamEngine : IAsyncDisposable
     private uint _rtpBase;
     private ushort _seqBase;
     private uint _ssrc;
+    private int _controlLogged;
+    private long _lastDiagIndex;
     private long _t0;
     private long _packetIndex;
 
@@ -150,7 +152,9 @@ public sealed class StreamEngine : IAsyncDisposable
             if (_running) return;
             _rtpBase = BinaryPrimitives.ReadUInt32BigEndian(RandomNumberGenerator.GetBytes(4));
             _seqBase = BinaryPrimitives.ReadUInt16BigEndian(RandomNumberGenerator.GetBytes(2));
-            _ssrc = BinaryPrimitives.ReadUInt32BigEndian(RandomNumberGenerator.GetBytes(4));
+            // AirPlay 2 senders using PTP timing leave the SSRC at zero (as OwnTone does, and Apple devices expect);
+            // only the older NTP-timed sessions use a random one
+            _ssrc = Ptp?.IsRunning == true && !ForceNtp ? 0u : BinaryPrimitives.ReadUInt32BigEndian(RandomNumberGenerator.GetBytes(4));
             _packetIndex = 0;
             Array.Clear(_histPayload);
             _t0 = MonoClock.NowNs;
@@ -218,6 +222,12 @@ public sealed class StreamEngine : IAsyncDisposable
             _histHeader[h] = (byte[])header.Clone();
             _histSeq[h] = seq;
 
+            if (Log.MinLevel <= LogLevel.Debug && _packetIndex - _lastDiagIndex >= 10 * Sr / Spp && Ptp != null)
+            {
+                _lastDiagIndex = _packetIndex;
+                foreach (var d in _sessions.Values)
+                    if (d.Address != null) Log.Debug($"{d.Info.Name}: {d.State}, {(d.UsesPtp ? "PTP" : "NTP")}; PTP from it: {Ptp.DescribePeer(d.Address)}");
+            }
             bool periodicSync = _packetIndex - lastSyncIndex >= Sr / Spp; // about once a second
             if (periodicSync) lastSyncIndex = _packetIndex;
 
@@ -294,7 +304,7 @@ public sealed class StreamEngine : IAsyncDisposable
             catch (SocketException) { continue; }
 
             var b = r.Buffer;
-            if (TestDrop > 0) Log.Debug($"control packet from {r.RemoteEndPoint}: {Convert.ToHexString(b.AsSpan(0, Math.Min(8, b.Length)))}");
+            if (TestDrop > 0 || (Log.MinLevel <= LogLevel.Debug && _controlLogged++ < 30)) Log.Debug($"control packet from {r.RemoteEndPoint}: {Convert.ToHexString(b.AsSpan(0, Math.Min(8, b.Length)))}");
             if (b.Length < 8 || b[0] != 0x80 || b[1] != 0xd5) continue;
             ushort first = BinaryPrimitives.ReadUInt16BigEndian(b.AsSpan(4));
             ushort count = BinaryPrimitives.ReadUInt16BigEndian(b.AsSpan(6));

@@ -74,7 +74,7 @@ MPID=$!
 sleep 0.5
 if [[ "$MODE" == "buffered" ]]; then
   [[ -f beeps.adts ]] || ffmpeg -hide_banner -loglevel error -y -f lavfi -i "aevalsrc=0.25*sin(2*PI*440*t)*lt(mod(t\,1)\,0.1):s=44100:c=stereo:d=20" -c:a aac -b:a 256k -f adts beeps.adts
-  $CLI send-buffered 10.91.0.2:7000,10.92.0.2:7000 --aac "$WORK/beeps.adts" --seconds 14 ${PAUSE_AT:+--pause-at $PAUSE_AT} ${NOW_PLAYING:+--now-playing} 2>&1 | tee "$WORK/play.txt" | grep -E "SESSION|END|ERR|DACP|NOWPLAYING" || true
+  $CLI send-buffered 10.91.0.2:7000,10.92.0.2:7000 --aac "$WORK/beeps.adts" --seconds 14 ${PAUSE_AT:+--pause-at $PAUSE_AT} ${NOW_PLAYING:+--now-playing} ${GM_SWITCH:+--gm-switch-at $GM_SWITCH} ${RESTREAM:+--restream-at $RESTREAM} 2>&1 | tee "$WORK/play.txt" | grep -E "SESSION|END|ERR|DACP|NOWPLAYING|SWITCH|RESTREAM" || true
   if [[ -n "${NOW_PLAYING:-}" ]]; then
     grep -E "NOWPLAYING|REMOTE" $WORK/airwave-rx.log | head -5
     grep -q "NOWPLAYING title=Test Song artist=Test Artist album=Test Album art=3000 duration=200.0" $WORK/airwave-rx.log || { echo "FAIL: now-playing info didn't arrive"; exit 1; }
@@ -90,8 +90,33 @@ grep -v onsets "$WORK/rsync.txt"
 if [[ "$MODE" == "buffered" ]]; then
   # Buffered audio is anchored to an exact instant, so check AirWave against the true schedule
   # (Shairport Sync's pipe output can't keep time precisely in this mode, so it only has to receive audio).
-  python3 "$HERE/check_schedule.py" "$WORK/rsync.txt" "$WORK/play.txt"
-  exit $?
+  python3 "$HERE/check_schedule.py" "$WORK/rsync.txt" "$WORK/play.txt" || exit 1
+  if [[ -n "${GM_SWITCH:-}" ]]; then
+    python3 - "$WORK/rsync.txt" "$WORK/play.txt" <<'PY2'
+import sys, re
+t, p = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+sw = float(re.search(r"SWITCH monotonic ([\d.]+)", p).group(1))
+on2 = [float(x) for x in re.search(r"rx2 onsets: (.*)", t).group(1).split()]
+after = [o for o in on2 if o > sw + 2.5]
+print(f"beeps after the new timekeeper took over: {len(after)}")
+assert len(after) >= 5, "AirWave went quiet when another clock took over timekeeping"
+print("PASS: keeps playing when another device (e.g. a HomePod joining) becomes the timekeeper")
+PY2
+  fi
+  if [[ -n "${RESTREAM:-}" ]]; then
+    python3 - "$WORK/rsync.txt" "$WORK/play.txt" <<'PY3'
+import sys, re
+t, p = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+rs = float(re.search(r"RESTREAM monotonic ([\d.]+)", p).group(1))
+on2 = [float(x) for x in re.search(r"rx2 onsets: (.*)", t).group(1).split()]
+after = [o for o in on2 if o > rs + 1.5]
+print(f"beeps after the stream was restarted: {len(after)}")
+assert len(after) >= 3, "AirWave stopped when the sender restarted the stream (as when a speaker joins the group)"
+print("PASS: keeps playing when the sender restarts the stream on the same connection (speaker added to the group)")
+PY3
+    if grep -q "another device took over" $WORK/airwave-rx.log; then echo "FAIL: AirWave treated the restart as a takeover"; exit 1; fi
+  fi
+  exit 0
 fi
 python3 - "$WORK/rsync.txt" <<'PY'
 import sys, re

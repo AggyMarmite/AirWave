@@ -442,14 +442,16 @@ internal sealed class RtspConnection : IDisposable
         var p = r.Body.Length > 0 ? BinaryPlist.Read(r.Body) as Dictionary<string, object> : null;
         _stream?.Dispose();
         _stream = null;
-        _rx.Player.Reset();
+        bool mine = ReferenceEquals(_rx.ActiveStream, this);
+        if (mine) _rx.Player.Reset();
         if (p != null && p.ContainsKey("streams"))
         {
-            // Just the stream: the sender may set up another on this connection
-            _rx.SetActive(null, null);
+            // Just the stream: the sender may set up another on this connection (it does when the group changes)
+            Log.Info("AirPlay: stream ended (connection kept for the next one)");
+            _rx.StreamEnded(this);
             return new Response();
         }
-        _rx.SetActive(null, null);
+        _rx.StreamEnded(this);
         return new Response { Status = -1 };
     }
 

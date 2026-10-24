@@ -15,10 +15,13 @@ using AirWave.Core.Plist;
 static class MockTvCommand
 {
     const string Pin = "4821", Password = "secret-pw";
+    /// <summary>--throttle-kbps N: read the picture no faster than N kbit/s, like a weak Wi-Fi link.</summary>
+    static int _throttleKbps;
 
     public static async Task<int> Run(string[] args)
     {
         string mode = Arg(args, "--mode") ?? "open";
+        _throttleKbps = int.Parse(Arg(args, "--throttle-kbps") ?? "0");
         int port = int.Parse(Arg(args, "--port") ?? "7100");
         string outPath = Arg(args, "--out") ?? "mirror-out.h264";
         int seconds = int.Parse(Arg(args, "--seconds") ?? "60");
@@ -203,9 +206,14 @@ static class MockTvCommand
             Console.WriteLine($"EVENTS reply {resp.Split("\r\n")[0]}");
         }
 
+        int throttleKbps = _throttleKbps;
         async Task Video(TcpListener l, byte[] key)
         {
             using var c = await l.AcceptTcpClientAsync();
+            if (throttleKbps > 0) c.ReceiveBufferSize = 64 * 1024;
+            var throttleStart = System.Diagnostics.Stopwatch.StartNew();
+            long throttleBytes = 0;
+            int lateFrames = 0, gapErrors = 0;
             var s = c.GetStream();
             using var aead = new ChaCha20Poly1305(key);
             ulong nonce = 0;
@@ -222,6 +230,13 @@ static class MockTvCommand
                     if (type == 2) { heartbeats++; continue; }
                     var payload = new byte[size];
                     await s.ReadExactlyAsync(payload);
+                    if (throttleKbps > 0)
+                    {
+                        throttleBytes += size + 128;
+                        double due = throttleBytes * 8.0 / (throttleKbps * 1000.0);
+                        double wait = due - throttleStart.Elapsed.TotalSeconds;
+                        if (wait > 0) await Task.Delay(TimeSpan.FromSeconds(wait));
+                    }
                     long ts = BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(8));
                     if (type == 1)
                     {
@@ -242,10 +257,13 @@ static class MockTvCommand
                     bool kf = header[5] == 0x10;
                     frames++; if (kf) keyframes++;
                     if (ts < lastTs) Console.WriteLine("ERR timestamps went backwards");
+                    // After skipped frames the picture must restart from a keyframe, or the TV would show garbage
+                    if (lastTs != 0 && !kf && ts - lastTs > (long)(0.05 * 4294967296.0)) { gapErrors++; Console.WriteLine($"ERR frames skipped without a keyframe after (gap {(ts - lastTs) / 4294967.296:0} ms)"); }
                     lastTs = ts;
                     // TV clock here is Unix ms: the frame's presentation time should be ~now + latency
                     double tsSec = (ts >> 32) + (ts & 0xffffffff) / 4294967296.0;
                     double lead = tsSec - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+                    if (lead < 0) lateFrames++;
                     if (frames % 30 == 1) Console.WriteLine($"FRAME {frames} key={kf} bytes={plain.Length} lead={lead * 1000:0}ms clock={BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(40)):X}");
                     int p = 0;
                     lock (_out)
@@ -260,6 +278,7 @@ static class MockTvCommand
             }
             catch (Exception ex) when (ex is EndOfStreamException or IOException or ObjectDisposedException) { }
             catch (CryptographicException) { Console.WriteLine("ERR video frame failed to decrypt"); }
+            Console.WriteLine($"VIDEO frames={frames} keyframes={keyframes} late={lateFrames} gaps_without_keyframe={gapErrors}");
             lock (_out) _out.Flush();
             Console.WriteLine($"VIDEO done frames={frames} keyframes={keyframes} heartbeats={heartbeats}");
         }

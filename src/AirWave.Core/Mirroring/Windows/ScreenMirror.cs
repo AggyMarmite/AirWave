@@ -41,6 +41,9 @@ public sealed class ScreenMirror : IDisposable
     public void Start()
     {
         _run = true;
+        // Keep less sound in hand than when playing to speakers: it all adds to the picture's delay
+        if (_audio is CapturedSource cs) cs.CushionMs = AudioCushionMs;
+        _session.KeyframeNeeded += OnNetworkBehind;
         _video = new Thread(VideoLoop) { IsBackground = true, Name = "AirWave mirror video", Priority = ThreadPriority.AboveNormal };
         _video.Start();
         if (_audio != null && _session.HasAudio)
@@ -62,6 +65,45 @@ public sealed class ScreenMirror : IDisposable
         return new SoftwarePipeline(maxW, maxH);
     }
 
+    private const int AudioCushionMs = 40;
+    private volatile IMirrorPipeline _pipe;
+    private int _bitrate;
+    private long _lastSqueeze, _lastRaise, _lastStats;
+    /// <summary>Current encoder bitrate (bits/s), after adapting to the network.</summary>
+    public int Bitrate => _bitrate;
+
+    // Frames were dropped because the network fell behind: keyframe now, and send less for a while
+    private void OnNetworkBehind()
+    {
+        var p = _pipe;
+        if (p == null) return;
+        p.ForceKeyframe();
+        long now = MonoClock.NowNs;
+        if (now - Interlocked.Read(ref _lastSqueeze) < 1_000_000_000L) return;
+        Interlocked.Exchange(ref _lastSqueeze, now);
+        int b = Math.Max(2_000_000, (int)(_bitrate * 0.7));
+        if (b == _bitrate) return;
+        _bitrate = b;
+        p.SetBitrate(b);
+        Log.Info($"Mirroring: network busy, picture bitrate down to {b / 1e6:0.0} Mbit/s");
+    }
+
+    private void AdaptBitrate(IMirrorPipeline p, long now)
+    {
+        // After 10 s without trouble, creep back up towards the full bitrate
+        if (_bitrate < p.MaxBitrate && now - Interlocked.Read(ref _lastSqueeze) > 10_000_000_000L && now - _lastRaise > 5_000_000_000L)
+        {
+            _lastRaise = now;
+            _bitrate = Math.Min(p.MaxBitrate, (int)(_bitrate * 1.15));
+            p.SetBitrate(_bitrate);
+        }
+        if (now - _lastStats > 10_000_000_000L)
+        {
+            _lastStats = now;
+            Log.Info($"Mirroring stats: {FramesSent} frames, {_session.FramesDropped} dropped, encode {EncodeMs:0.0} ms, capture→sent {_session.SendDelayMs:0} ms, delay on TV {_session.LatencyMs} ms, {_bitrate / 1e6:0.0} Mbit/s");
+        }
+    }
+
     private void VideoLoop()
     {
         IMirrorPipeline pipe = null;
@@ -74,6 +116,8 @@ public sealed class ScreenMirror : IDisposable
             {
                 pipe = Choose(gpu);
                 pipe.Output += Send;
+                _bitrate = pipe.MaxBitrate;
+                _pipe = pipe;
                 Resolution = $"{pipe.Width}×{pipe.Height}";
                 Fps = pipe.Fps;
                 Encoder = pipe.EncoderKind;
@@ -92,8 +136,10 @@ public sealed class ScreenMirror : IDisposable
                     sw.Restart();
                     pipe.Tick(MonoClock.NowNs);
                     EncodeMs = EncodeMs * 0.95 + sw.Elapsed.TotalMilliseconds * 0.05;
+                    AdaptBitrate(pipe, MonoClock.NowNs);
                 }
                 bool broken = pipe.Broken;
+                _pipe = null;
                 pipe.Output -= Send;
                 pipe.Dispose();
                 pipe = null;
@@ -138,8 +184,8 @@ public sealed class ScreenMirror : IDisposable
         var pcm = new short[352 * 2];
         long start = MonoClock.NowNs;
         long sent = 0;
-        // The capture keeps about 100 ms in hand, so what we read now was heard ~100 ms ago
-        const long CaptureDelayNs = 100_000_000L;
+        // The capture keeps a cushion of sound in hand, so what we read now was heard that long ago (plus Windows' own ~10 ms)
+        long CaptureDelayNs = ((_audio as CapturedSource)?.CushionMs ?? 100) * 1_000_000L + 10_000_000L;
         while (_run && _session.IsOpen)
         {
             long due = (MonoClock.NowNs - start) * 44100 / 1_000_000_000L;

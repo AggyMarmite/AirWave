@@ -137,6 +137,8 @@ internal sealed class HardwareH264Encoder : IDisposable
     }
 
     public void ForceKeyframe() => TrySet(CODECAPI_AVEncVideoForceKeyFrame, 1u);
+    /// <summary>Changes the bitrate while encoding (to suit the network).</summary>
+    public void SetBitrate(int bps) => TrySet(CODECAPI_AVEncCommonMeanBitRate, (uint)bps);
 
     /// <summary>Hands a frame (NV12 on the card, sample time = capture time / 100) to the encoder, if it's ready for one.</summary>
     /// <returns>False if the encoder was still busy and the frame was skipped.</returns>
