@@ -13,7 +13,7 @@
     <AssemblyName>AirWave</AssemblyName>
     <RootNamespace>AirWave</RootNamespace>
     <Product>AirWave</Product>
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\AirWave.ico</ApplicationIcon>
     <PlatformTarget>x64</PlatformTarget>
