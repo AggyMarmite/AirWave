@@ -75,13 +75,23 @@ public sealed class StreamEngine : IAsyncDisposable
     internal bool TryRemoteTime(SpeakerSession s, long localNs, out long remoteNs, out ulong timeline)
     {
         remoteNs = localNs; timeline = Ptp?.ClockId ?? 0;
-        if (Ptp == null || !Ptp.Yield || !s.UsesPtp) return true;
+        if (!SpeakerKeepsTime(s.Info, s.UsesPtp)) return true;
         var off = Follower.GetOffset(s.SpeakerClockId, out long followed);
         if (off == null || followed < 500_000_000L) return false;
         remoteNs = localNs + off.Value;
         timeline = s.SpeakerClockId;
         return true;
     }
+
+    /// <summary>
+    /// HomePods keep time themselves and AirWave follows their clock, as a Mac does. Tested on HomePod minis: with
+    /// AirWave as the timekeeper they often stay silent. Other speakers keep following AirWave's clock.
+    /// </summary>
+    public bool HomePodsKeepTime { get; set; } = true;
+
+    /// <summary>Whether this speaker keeps time (we follow its clock) rather than following ours.</summary>
+    internal bool SpeakerKeepsTime(SpeakerInfo info, bool usesPtp) =>
+        Ptp != null && usesPtp && (Ptp.Yield || (HomePodsKeepTime && info.IsHomePod));
 
     /// <summary>Apple speakers and TVs get buffered audio, as from an iPhone; others get realtime ALAC.</summary>
     internal bool WantsBuffered(SpeakerInfo info) =>

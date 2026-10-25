@@ -76,6 +76,7 @@ public sealed class PtpMaster : IDisposable
         public IPAddress Address;
         public DateTime LastSeen;
         public bool HelloSeen;
+        public bool Yield;   // this peer keeps time; we only follow it
     }
 
     /// <summary>
@@ -120,17 +121,19 @@ public sealed class PtpMaster : IDisposable
         _ = Task.Run(SendLoop);
     }
 
-    public int AddPeer(IPAddress address)
+    /// <param name="yieldTo">Let this peer keep time (as a Mac does with a HomePod): we announce ourselves as a weaker
+    /// clock to it and send it no time of our own; the engine follows its clock instead.</param>
+    public int AddPeer(IPAddress address, bool yieldTo = false)
     {
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
         foreach (var kv in _peers)
-            if (kv.Value.Address.Equals(address)) { kv.Value.LastSeen = DateTime.UtcNow; return kv.Key; }
+            if (kv.Value.Address.Equals(address)) { kv.Value.LastSeen = DateTime.UtcNow; kv.Value.Yield = yieldTo; return kv.Key; }
         int id = Interlocked.Increment(ref _nextPeerId);
-        _peers[id] = new Peer { Address = address, LastSeen = DateTime.UtcNow };
-        Log.Debug($"PTP: added peer {address}");
+        _peers[id] = new Peer { Address = address, LastSeen = DateTime.UtcNow, Yield = yieldTo };
+        Log.Debug($"PTP: added peer {address}{(yieldTo ? " (it keeps time)" : "")}");
         // Get the new speaker locked on quickly instead of waiting for the next timer tick
         SendAnnounce();
-        if (!Yield) SendSync();
+        SendSync();
         return id;
     }
 
@@ -159,7 +162,7 @@ public sealed class PtpMaster : IDisposable
                 SendSignaling();
                 nextAnnounce = now + 1000;
             }
-            if (now >= nextSync && !Yield)
+            if (now >= nextSync)
             {
                 SendSync();
                 nextSync = now + 125;
@@ -208,13 +211,17 @@ public sealed class PtpMaster : IDisposable
 
     // ---------------------------------------------------------------- sending
 
-    private void SendAll(UdpClient udp, int port, byte[] msg)
+    private bool Yields(Peer p) => Yield || p.Yield;
+
+    /// <param name="yielding">null = every peer; true/false = only peers we yield to / keep time for.</param>
+    private void SendAll(UdpClient udp, int port, byte[] msg, bool? yielding = null)
     {
         var now = DateTime.UtcNow;
         bool announce = (msg[0] & 0x0f) == 0x0B;
         foreach (var p in _peers.Values)
         {
             if ((now - p.LastSeen).TotalSeconds > StaleSeconds) continue;
+            if (yielding is bool y && Yields(p) != y) continue;
             if (SilentUntilHello && !p.HelloSeen && !announce) continue;
             SendTo(udp, p.Address, port, msg);
         }
@@ -229,20 +236,27 @@ public sealed class PtpMaster : IDisposable
     private void SendAnnounce()
     {
         if (!IsRunning) return;
+        ushort seq = _announceSeq++;
+        SendAll(_general, GeneralPort, MakeAnnounce(false, seq), yielding: false);
+        SendAll(_general, GeneralPort, MakeAnnounce(true, seq), yielding: true);
+    }
+
+    private byte[] MakeAnnounce(bool yield, ushort seq)
+    {
         var m = new byte[76];
-        Header(m, 0x0B, _announceSeq++, 0, 0x0408);
+        Header(m, 0x0B, seq, 0, 0x0408);
         // originTimestamp 0 (as iOS)
         // currentUtcOffset(2)=0, reserved(1)=0
-        m[47] = Yield ? (byte)250 : (byte)128; // priority1 (250 = a Mac's, which loses to a HomePod's 248)
-        BinaryPrimitives.WriteUInt32BigEndian(m.AsSpan(48), Yield ? 0xF8FE436Au : 0x06210000 | 0x436A); // clock quality
-        m[52] = Yield ? (byte)248 : (byte)128; // priority2
+        m[47] = yield ? (byte)250 : (byte)128; // priority1 (250 = a Mac's, which loses to a HomePod's 248)
+        BinaryPrimitives.WriteUInt32BigEndian(m.AsSpan(48), yield ? 0xF8FE436Au : 0x06210000 | 0x436A); // clock quality
+        m[52] = yield ? (byte)248 : (byte)128; // priority2
         BinaryPrimitives.WriteUInt64BigEndian(m.AsSpan(53), ClockId); // grandmasterIdentity
         // stepsRemoved(2)=0
-        m[63] = Yield ? (byte)0xA0 : (byte)0x20; // timeSource: internal oscillator / GPS
+        m[63] = yield ? (byte)0xA0 : (byte)0x20; // timeSource: internal oscillator / GPS
         BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(64), 0x0008); // path trace TLV
         BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(66), 8);
         BinaryPrimitives.WriteUInt64BigEndian(m.AsSpan(68), ClockId);
-        SendAll(_general, GeneralPort, m);
+        return m;
     }
 
     private void SendSignaling()
@@ -266,7 +280,7 @@ public sealed class PtpMaster : IDisposable
         Header(sync, 0x00, seq, -3, 0x0608);
         long ts = MonoClock.NowNs;
         WriteTimestamp(sync.AsSpan(34), ts); // approximate (two-step: Follow_Up has the precise one), as OwnTone does
-        SendAll(_event, EventPort, sync);
+        SendAll(_event, EventPort, sync, yielding: false);
 
         var fu = new byte[96];
         Header(fu, 0x08, seq, -3, 0x0408);
@@ -276,7 +290,7 @@ public sealed class PtpMaster : IDisposable
         var cid = new byte[8];
         BinaryPrimitives.WriteUInt64BigEndian(cid, ClockId);
         WriteOrgTlv(fu, ref p, 16, new byte[] { 0x00, 0x0d, 0x93 }, new byte[] { 0, 0, 4 }, cid);
-        SendAll(_general, GeneralPort, fu);
+        SendAll(_general, GeneralPort, fu, yielding: false);
     }
 
     private byte[] MakeDelayResp(byte[] req, long rxNs)

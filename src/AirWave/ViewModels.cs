@@ -36,6 +36,7 @@ public sealed class SpeakerViewModel : Observable
     public SpeakerInfo Info { get; private set; }
     public string Id => Info.Id;
     public string Name => Info.Name;
+    public override string ToString() => Name;
     public string Kind => Info.Kind;
 
     public SpeakerViewModel(AppController app, SpeakerInfo info, double volume)

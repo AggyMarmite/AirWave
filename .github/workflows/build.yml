@@ -53,6 +53,13 @@ jobs:
           & $cli aac-delay --debug 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\selftest\aac-delay.txt"
           if ($LASTEXITCODE -ne 0) { throw "AAC encoder not working" }
 
+      - name: HomePods keep time, other speakers follow AirWave
+        shell: pwsh
+        run: |
+          $cli = "src\AirWave.TestCli\bin\Release\net8.0\AirWave.TestCli.exe"
+          & $cli ptp-yield 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\selftest\ptp-yield.txt"
+          if ($LASTEXITCODE -ne 0) { throw "Per-speaker timekeeping wrong" }
+
       - name: Screen mirroring from Windows (to a stand-in TV)
         shell: pwsh
         run: |

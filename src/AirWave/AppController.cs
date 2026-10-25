@@ -391,6 +391,7 @@ public sealed class AppController : Observable, IAsyncDisposable
     {
         var vm = Speakers.FirstOrDefault(x => x.Id == s.Info.Id);
         if (vm == null) return;
+        if (_labRunning) return; // the speaker test's own sessions: cards stay off
         if (s.State == SpeakerState.Idle && !vm.IsOn) return;
         vm.ApplySession(s);
         if (s.State == SpeakerState.Failed)
@@ -1005,6 +1006,7 @@ public sealed class AppController : Observable, IAsyncDisposable
         {
             LabResults = lines.ToString();
             LabRunning = false;
+            foreach (var s in Speakers) if (s.State != SpeakerUiState.Problem) { s.State = SpeakerUiState.Off; s.Status = s.DefaultStatus; }
             UpdateStatusLine();
         }
     }

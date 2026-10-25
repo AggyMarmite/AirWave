@@ -42,6 +42,35 @@ if (args[0] == "lab")
     return;
 }
 
+if (args[0] == "ptp-yield")
+{
+    // PTP to a mixed group: a speaker we keep time for gets our strong Announce plus Sync/Follow_Up; a HomePod (which
+    // keeps time itself) gets a weak Announce (priority 250) and no Sync. Peers on 127.0.0.2 and 127.0.0.3.
+    var a = IPAddress.Parse("127.0.0.2"); var h = IPAddress.Parse("127.0.0.3");
+    var socks = new[] { (a, 319), (a, 320), (h, 319), (h, 320) }.Select(x => (x.Item1, x.Item2, u: new System.Net.Sockets.UdpClient(new IPEndPoint(x.Item1, x.Item2)))).ToList();
+    using var m = new AirWave.Core.Timing.PtpMaster(standardPorts: false);
+    m.AddPeer(a); m.AddPeer(h, yieldTo: true);
+    var got = new Dictionary<IPAddress, List<(int type, int p1)>> { [a] = new(), [h] = new() };
+    var until = DateTime.UtcNow.AddSeconds(2.5);
+    await Task.WhenAll(socks.Select(async x =>
+    {
+        while (DateTime.UtcNow < until)
+        {
+            var t = x.u.ReceiveAsync(); if (await Task.WhenAny(t, Task.Delay(200)) != t) continue;
+            var b = t.Result.Buffer; lock (got) got[x.Item1].Add((b[0] & 0x0f, b.Length >= 48 ? b[47] : -1));
+        }
+    }));
+    foreach (var x in socks) x.u.Dispose();
+    int syncA = got[a].Count(g => g.type == 0), syncH = got[h].Count(g => g.type is 0 or 8);
+    var annA = got[a].Where(g => g.type == 0x0B).Select(g => g.p1).Distinct().ToList();
+    var annH = got[h].Where(g => g.type == 0x0B).Select(g => g.p1).Distinct().ToList();
+    Console.WriteLine($"PTPYIELD speaker: sync {syncA}, announce priority {string.Join("/", annA)}; homepod: sync {syncH}, announce priority {string.Join("/", annH)}");
+    bool ok = syncA > 5 && annA.SequenceEqual(new[] { 128 }) && syncH == 0 && annH.SequenceEqual(new[] { 250 });
+    Console.WriteLine(ok ? "PASS: per-speaker timekeeping" : "FAIL: per-speaker timekeeping");
+    Environment.ExitCode = ok ? 0 : 1;
+    return;
+}
+
 if (args[0] == "aac-delay")
 {
     // The AAC encoder's start-up delay, as AirWave will compensate it (Windows: measured with Media Foundation)
@@ -62,7 +91,8 @@ if (args[0] == "play")
         if (args[i] == "--seconds") seconds = int.Parse(args[++i]);
         if (args[i] == "--pcm") pcm = args[++i];
     }
-    await using var engine = new StreamEngine(enablePtp: !args.Contains("--ntp")) { ClientName = "AirWave Test", ForceNtp = args.Contains("--ntp"), ForceBuffered = args.Contains("--buffered") };
+    // HomePodsKeepTime off: the stand-in "HomePod" here is AirWave's own receiver, which follows a clock but never keeps one
+    await using var engine = new StreamEngine(enablePtp: !args.Contains("--ntp")) { ClientName = "AirWave Test", ForceNtp = args.Contains("--ntp"), ForceBuffered = args.Contains("--buffered"), HomePodsKeepTime = false };
     if (args.Contains("--delay")) engine.DelayMs = int.Parse(args[Array.IndexOf(args, "--delay") + 1]);
     engine.Source = pcm != null ? new RawPcmSource(pcm) : new ToneSource();
     int stagger = args.Contains("--stagger") ? int.Parse(args[Array.IndexOf(args, "--stagger") + 1]) : 0;

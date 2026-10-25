@@ -101,7 +101,7 @@ public sealed class SpeakerSession : IAsyncDisposable
             await SetupAsync(ct);
             NeedsStart = true;
             SetState(SpeakerState.Ready);
-            Log.Info($"{Info.Name}: ready ({(UsesPtp ? "PTP" : "NTP")} timing{(_engine.Ptp?.Yield == true ? ", following the speaker's clock" : "")}, {Style switch { StreamStyle.Buffered => "buffered AAC", StreamStyle.BufferedLateAnchor => "buffered AAC, late start", StreamStyle.RealtimeJustInTime => "realtime ALAC, just in time", _ => "realtime ALAC" }})");
+            Log.Info($"{Info.Name}: ready ({(UsesPtp ? "PTP" : "NTP")} timing{(_engine.SpeakerKeepsTime(Info, UsesPtp) ? ", following the speaker's clock" : "")}, {Style switch { StreamStyle.Buffered => "buffered AAC", StreamStyle.BufferedLateAnchor => "buffered AAC, late start", StreamStyle.RealtimeJustInTime => "realtime ALAC, just in time", _ => "realtime ALAC" }})");
             _keepAlive = new Timer(_ => _ = KeepAliveAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
             return true;
         }
@@ -278,7 +278,7 @@ public sealed class SpeakerSession : IAsyncDisposable
                     if (IPAddress.TryParse(a.Split('%')[0], out var ip) && ip.AddressFamily == Address.AddressFamily) { peerAddr = ip; break; }
                 if (tp.TryGetValue("ClockID", out var cid)) SpeakerClockId = cid switch { long l => unchecked((ulong)l), ulong u => u, _ => 0 };
             }
-            _ptpPeerId = _engine.Ptp.AddPeer(peerAddr);
+            _ptpPeerId = _engine.Ptp.AddPeer(peerAddr, _engine.SpeakerKeepsTime(Info, true));
         }
 
         if (eventPort > 0)
