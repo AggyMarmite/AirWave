@@ -1,0 +1,2 @@
+12:50:25.388 [D] Windows AAC encoder start-up delay measured as 0 samples
+AACDELAY Windows AAC encoder: 0 samples

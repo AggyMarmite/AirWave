@@ -1,0 +1,7 @@
+12:49:47.252 [I] Capturing all apps' sound (unaffected by muting this PC)
+CAPTURE app capture, not muted: peak 0.372 (apps)
+12:49:51.617 [I] Capturing all apps' sound (unaffected by muting this PC)
+CAPTURE app capture, PC muted: peak 0.367 (apps)
+12:49:55.637 [I] Capturing "Speakers (VB-Audio Virtual Cable)" (48000 Hz, 2 ch, float)
+CAPTURE device capture, PC muted: peak 0.370 (device Speakers (VB-Audio Virtual Cable))
+PASS: muting the PC doesn't silence what AirWave sends

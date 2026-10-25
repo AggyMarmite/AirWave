@@ -1,0 +1,29 @@
+ok   now playing: replace
+ok   now playing: merge keeps fields
+ok   now playing: replace clears
+ok   now playing: classic DMAP
+ok   now playing: classic progress
+ok   DACP: SRV port from mDNS reply
+ok   update: version
+ok   update: assets
+ok   update: newer
+ok   update: same is not newer
+ok   update: prerelease ignored
+ok   X25519 vector 1
+ok   X25519 public
+ok   X25519 shared
+ok   Ed25519 public 1
+ok   Ed25519 sign 1
+ok   Ed25519 verify 1
+ok   Ed25519 sign 3
+ok   Ed25519 rejects bad signature
+ok   transient pair-setup agrees on key
+ok   full pair-setup exchanges long-term keys
+ok   pair-verify agrees on key
+ok   wrong PIN is rejected
+ok   ALAC 16-bit decodes exactly (176400 samples, 0 differ)
+ok   ALAC 24-bit decodes exactly (176400 samples, 0 differ)
+ok   AAC decoder keeps frames in order (87/88)
+     gain vs reference 1.000, SNR after gain 102 dB, per-frame SNR: 144 144 144 144 144 144 144 99 99 144 99 99 100 99 144 144
+ok   AAC output lines up with the reference decoder (lag 0 frames, SNR 156 dB)
+ALL PASSED

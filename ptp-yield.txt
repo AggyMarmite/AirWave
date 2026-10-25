@@ -1,0 +1,2 @@
+PTPYIELD speaker: sync 22, announce priority 128; homepod: sync 0, announce priority 250
+PASS: per-speaker timekeeping

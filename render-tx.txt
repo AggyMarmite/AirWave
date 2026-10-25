@@ -1,0 +1,4 @@
+691 AAC frames
+SESSION 127.0.0.1:7000: ready
+ANCHOR monotonic 166.521795
+END 127.0.0.1:7000

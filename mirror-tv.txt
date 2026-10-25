@@ -1,0 +1,51 @@
+MOCKTV ready mode=pin port=7150
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-pin-start
+PIN 4821
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-setup
+MOCKTV <- POST /pair-verify
+MOCKTV <- POST /pair-verify
+MOCKTV <- SETUP rtsp://127.0.0.1:7150/1236373684666679391
+SESSION name=AirWave Test mirroring=True
+MOCKTV <- RECORD rtsp://127.0.0.1:7150/1236373684666679391
+EVENTS reply RTSP/1.0 200 OK
+MOCKTV <- SETUP rtsp://127.0.0.1:7150/1236373684666679391
+MOCKTV <- SETUP rtsp://127.0.0.1:7150/3957508720216773963
+MOCKTV <- SET_PARAMETER rtsp://127.0.0.1:7150/1236373684666679391
+MOCKTV <- SET_PARAMETER rtsp://127.0.0.1:7150/1236373684666679391
+AUDIO sync first=True
+AUDIO packets ok=1 bad=0
+CODEC 1024x768 sps 26 pps 4 ts 6ADDFB1B68A2DD0F
+FRAME 1 key=True bytes=34987 lead=158ms clock=1122334455667788
+ERR frames skipped without a keyframe after (gap 101 ms)
+AUDIO sync first=False
+FRAME 31 key=False bytes=163 lead=228ms clock=1122334455667788
+AUDIO packets ok=201 bad=0
+MOCKTV <- POST /feedback
+CODEC 1024x768 sps 26 pps 4 ts 6ADDFB1D68BD7F51
+FRAME 61 key=True bytes=51872 lead=223ms clock=1122334455667788
+AUDIO packets ok=401 bad=0
+FRAME 91 key=False bytes=128 lead=227ms clock=1122334455667788
+MOCKTV <- POST /feedback
+CODEC 1024x768 sps 26 pps 4 ts 6ADDFB1F6813264D
+FRAME 121 key=True bytes=51872 lead=224ms clock=1122334455667788
+AUDIO packets ok=601 bad=0
+FRAME 151 key=False bytes=212 lead=217ms clock=1122334455667788
+MOCKTV <- POST /feedback
+CODEC 1024x768 sps 26 pps 4 ts 6ADDFB2167346E9C
+FRAME 181 key=True bytes=51828 lead=224ms clock=1122334455667788
+AUDIO packets ok=801 bad=0
+FRAME 211 key=False bytes=128 lead=240ms clock=1122334455667788
+AUDIO packets ok=1001 bad=0
+MOCKTV <- POST /feedback
+CODEC 1024x768 sps 26 pps 4 ts 6ADDFB2369114E06
+FRAME 241 key=True bytes=51828 lead=215ms clock=1122334455667788
+FRAME 271 key=False bytes=128 lead=221ms clock=1122334455667788
+AUDIO packets ok=1201 bad=0
+MOCKTV <- POST /feedback
+MOCKTV <- TEARDOWN rtsp://127.0.0.1:7150/1236373684666679391
+TEARDOWN
+VIDEO frames=296 keyframes=5 late=0 gaps_without_keyframe=1
+VIDEO done frames=296 keyframes=5 heartbeats=10

@@ -1,0 +1,54 @@
+12:50:00.694 [I] AirPlay receiver "CI-AirWave" listening on port 7000
+READY CI-AirWave port 7000
+12:50:00.741 [I] Playback on Speakers (VB-Audio Virtual Cable) (buffer 60 ms, latency 0.0 ms)
+12:50:06.291 [D] AirPlay <- GET /info [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345]  -> 200 {deviceID="96:4C:B4:61:11:E5", features=1622055604472320, featuresEx="AEocQEDDBQA", statusFlags=4, model="AirWave", name="CI-AirWave", pi="d7de9137-4ddd-47a0-a1c7-a08b74d19737", psi="d7de9137-4ddd-47a0-a1c7-a08b74d19737", pk=<32 bytes>, protocolVersion="1.1", sourceVersion="366.0", senderAddress="127.0.0.1:60918", initialVolume=-15, vv=2, volumeControlType=4, keepAliveSendStatsAsBody=False, canRecordScreenStream=False, screenDemoMode=False, playbackCapabilities={supportsInterstitials=False, supportsFPSSecureStop=False, supportsUIForAudioOnlyContent=False}, supportedFormats={audioStream=262144, bufferStream=4456448}, txtAirPlay=<332 bytes>}
+12:50:06.347 [D] AirPlay <- POST /pair-setup [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, X-Apple-HKP: 4, Content-Type: application/octet-stream] <9 bytes> -> 200 
+12:50:06.477 [D] AirPlay <- POST /pair-setup [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, X-Apple-HKP: 4, Content-Type: application/octet-stream] <457 bytes> -> 200 
+12:50:06.480 [D] AirPlay: 127.0.0.1 paired (transient)
+12:50:06.526 [D] AirPlay <- SETUP rtsp://127.0.0.1/1000024043 [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, Content-Type: application/x-apple-binary-plist] {name="Buffered Test", deviceID="02:11:22:33:44:55", sessionUUID="B3C5D4FA-9623-4F9A-B760-C525A6F074B3", timingProtocol="PTP", macAddress="02:11:22:33:44:55", groupUUID="52425FDC-BD6B-44E4-9A87-90B33290D37C", groupContainsGroupLeader=False, timingPeerInfo={Addresses=["127.0.0.1"], ID="2C34E916-7CA0-43F8-9D6F-F1DE1A7ECF79", DeviceType=0, ClockID=124983000387517872, SupportsClockPortMatchingOverride=False}, timingPeerList=[{Addresses=["127.0.0.1"], ID="2C34E916-7CA0-43F8-9D6F-F1DE1A7ECF79", DeviceType=0, ClockID=124983000387517872, SupportsClockPortMatchingOverride=False}]} -> 200 {eventPort=60919, timingPort=0, timingPeerInfo={Addresses=["127.0.0.1", "fe80::fe67:785a:ee3c:bb3b%15", "10.1.0.126", "fe80::acb0:be6b:fa9d:9f50%12", "172.30.96.1"], ID="127.0.0.1"}}
+12:50:06.535 [D] AirPlay <- RECORD rtsp://127.0.0.1/1000024043 [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345]  -> 200 
+12:50:06.536 [D] AirPlay <- SETPEERS rtsp://127.0.0.1/1000024043 [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, Content-Type: /peer-list-changed] ["127.0.0.1", "127.0.0.1"] -> 200 
+12:50:06.536 [D] PTP: first message type 0x0 from 127.0.0.1 (clock 01BC07606D0F7DB0)
+12:50:06.536 [D] PTP: first message type 0xB from 127.0.0.1 (clock 01BC07606D0F7DB0): clock 01BC07606D0F7DB0, grandmaster 01BC07606D0F7DB0, priority 128/128, class 6
+12:50:06.539 [I] AirPlay: Buffered Test is playing to this PC
+STATE client=Buffered Test
+12:50:06.541 [D] PTP: saying hello to clock 01BC07606D0F7DB0 at 127.0.0.1
+12:50:06.542 [D] PTP: first message type 0x8 from 127.0.0.1 (clock 01BC07606D0F7DB0)
+12:50:06.542 [I] AirPlay: buffered stream from Buffered Test (format 0x400000)
+STATE client=Buffered Test
+12:50:06.543 [D] AirPlay <- SETUP rtsp://127.0.0.1/1000024043 [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, Content-Type: application/x-apple-binary-plist] {streams=[{audioFormat=4194304, audioMode="default", controlPort=0, ct=4, isMedia=True, shk=<32 bytes>, spf=1024, sr=44100, type=103, supportsDynamicStreamID=True, streamConnectionID=1967241266, clientID="467a6921-0e04-4739-9b35-396174758994"}]} -> 200 {streams=[{type=103, dataPort=60920, controlPort=65115, audioBufferSize=8388608}]}
+STATE client=Buffered Test
+12:50:06.557 [D] AirPlay <- SET_PARAMETER rtsp://127.0.0.1/1000024043 [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, Content-Type: text/parameters] volume: -5.000000 -> 200 
+12:50:07.265 [D] PTP: first message type 0xC from 127.0.0.1 (clock 01BC07606D0F7DB0)
+STATE client=Buffered Test
+12:50:08.060 [D] AirPlay <- SETRATEANCHORTIME rtsp://127.0.0.1/1000024043 [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, Content-Type: application/x-apple-binary-plist] {rate=1, rtpTime=481716318, networkTimeSecs=1003, networkTimeFrac=-3697434022669416448, networkTimeTimelineID=124983000387517872, networkTimeFlags=0} -> 200 
+12:50:08.068 [D] player: offset -5823422070 target 481631766 cursor -9223372036854775808 err 0.0 blocks 0 first 0
+12:50:09.083 [D] player: offset -5823404217 target 481676766 cursor 481676748 err 8.1 blocks 86 first 481716318
+ONSET 166.545933
+12:50:10.095 [D] player: offset -5823383776 target 481721289 cursor 481721289 err 5.0 blocks 130 first 481716318
+ONSET 167.546475
+12:50:11.104 [D] player: offset -5823366281 target 481765817 cursor 481765830 err 7.2 blocks 169 first 481720414
+ONSET 168.545746
+12:50:12.122 [D] player: offset -5823350859 target 481810810 cursor 481810812 err -1.8 blocks 169 first 481765470
+ONSET 169.546505
+12:50:13.142 [D] player: offset -5823340416 target 481855808 cursor 481855794 err 9.0 blocks 169 first 481810526
+ONSET 170.545565
+12:50:14.156 [D] player: offset -5823336187 target 481900334 cursor 481900335 err 6.3 blocks 169 first 481855582
+ONSET 171.545613
+12:50:15.171 [D] player: offset -5823333289 target 481945309 cursor 481945317 err 7.7 blocks 169 first 481900638
+ONSET 172.545887
+12:50:16.185 [D] player: offset -5823331029 target 481989879 cursor 481989858 err 3.8 blocks 169 first 481944670
+ONSET 173.545738
+12:50:17.203 [D] player: offset -5823327613 target 482034863 cursor 482034840 err 5.5 blocks 169 first 481989726
+ONSET 174.545780
+12:50:18.222 [D] player: offset -5823327208 target 482079821 cursor 482079822 err -1.4 blocks 169 first 482034782
+ONSET 175.545755
+12:50:19.235 [D] player: offset -5823324985 target 482124351 cursor 482124363 err 2.9 blocks 170 first 482078814
+ONSET 176.545869
+12:50:20.252 [D] player: offset -5823324406 target 482169345 cursor 482169345 err 4.1 blocks 169 first 482123870
+ONSET 177.545830
+12:50:21.265 [D] player: offset -5823323552 target 482213906 cursor 482213886 err 1.5 blocks 169 first 482168926
+ONSET 178.546437
+12:50:22.286 [D] player: offset -5823322277 target 482258850 cursor 482258868 err -0.5 blocks 160 first 482213982
+STATE client=-
+12:50:22.577 [D] AirPlay <- TEARDOWN rtsp://127.0.0.1/1000024043 [User-Agent: AirPlay/665.13.1, X-Apple-Client-Name: Buffered Test, DACP-ID: 1A2B3C4D5E6F7788, Active-Remote: 12345, Content-Type: application/x-apple-binary-plist] {} -> -1 
