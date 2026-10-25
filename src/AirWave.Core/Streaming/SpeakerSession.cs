@@ -43,6 +43,17 @@ public sealed class SpeakerSession : IAsyncDisposable
     public SpeakerProblem Problem { get; private set; }
     public string ProblemText { get; private set; }
     public bool UsesPtp { get; private set; }
+    /// <summary>
+    /// AirPlay 2 "buffered" audio (AAC over TCP, anchored with SETRATEANCHORTIME) — what iPhones send to HomePods
+    /// and Apple TVs, which ignore the realtime stream unless it arrives just in time. Others get realtime ALAC.
+    /// </summary>
+    public bool Buffered { get; private set; }
+    /// <summary>Set when a buffered speaker needs (re)anchoring: on start, and when its timing nudge changes.</summary>
+    internal volatile bool NeedsAnchor;
+    private Socket _bufData;
+    private NetworkStream _bufStream;
+    private uint _bufSeq = (uint)RandomNumberGenerator.GetInt32(1 << 22);
+    private readonly object _bufLock = new();
     public IPEndPoint ControlEndPoint { get; private set; }
     public IPAddress Address { get; private set; }
     public double Volume { get; private set; } = 0.5;
@@ -79,7 +90,7 @@ public sealed class SpeakerSession : IAsyncDisposable
             await SetupAsync(ct);
             NeedsStart = true;
             SetState(SpeakerState.Ready);
-            Log.Info($"{Info.Name}: ready ({(UsesPtp ? "PTP" : "NTP")} timing)");
+            Log.Info($"{Info.Name}: ready ({(UsesPtp ? "PTP" : "NTP")} timing, {(Buffered ? "buffered AAC" : "realtime ALAC")})");
             _keepAlive = new Timer(_ => _ = KeepAliveAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
             return true;
         }
@@ -276,6 +287,17 @@ public sealed class SpeakerSession : IAsyncDisposable
             if (!rp.Ok) Log.Debug($"{Info.Name}: SETPEERS answered {rp}");
         }
 
+        Buffered = UsesPtp && _engine.WantsBuffered(Info);
+        if (Buffered) await SetupBufferedStreamAsync(ct);
+        else await SetupRealtimeStreamAsync(ct);
+
+        // Volume last: some speakers (e.g. Sonos) ignore it otherwise
+        await SendVolumeAsync(Volume, ct);
+        if (Buffered) NeedsAnchor = true;
+    }
+
+    private async Task SetupRealtimeStreamAsync(CancellationToken ct)
+    {
         // SETUP (stream): realtime ALAC 44.1kHz/16/2, with this speaker's audio key
         var stream = new Dictionary<string, object>
         {
@@ -306,9 +328,88 @@ public sealed class SpeakerSession : IAsyncDisposable
         _data = new Socket(Address.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
         _data.Connect(new IPEndPoint(Address, dataPort));
 
-        // Volume last: some speakers (e.g. Sonos) ignore it otherwise
-        await SendVolumeAsync(Volume, ct);
-        Log.Debug($"{Info.Name}: data port {dataPort}, control port {controlPort}, events {eventPort}");
+        Log.Debug($"{Info.Name}: realtime audio, data port {dataPort}, control port {controlPort}");
+    }
+
+    private async Task SetupBufferedStreamAsync(CancellationToken ct)
+    {
+        // SETUP (stream): buffered AAC-LC 44.1kHz stereo over TCP, as iOS sends to HomePods
+        var stream = new Dictionary<string, object>
+        {
+            ["audioFormat"] = 0x400000L,         // AAC-LC/44100/2
+            ["audioMode"] = "default",
+            ["controlPort"] = (long)_engine.ControlPort,
+            ["ct"] = 4L,                          // compression: AAC
+            ["isMedia"] = true,
+            ["shk"] = _sharedSecret.AsSpan(0, 32).ToArray(),
+            ["spf"] = 1024L,
+            ["sr"] = (long)SampleRate,
+            ["type"] = 103L,                      // buffered audio
+            ["supportsDynamicStreamID"] = true,
+            ["streamConnectionID"] = (long)_sessionId,
+            ["clientID"] = _engine.PtpClockUuid,
+        };
+        var root = new Dictionary<string, object> { ["streams"] = new List<object> { stream } };
+        var rst = await _rtsp.SendAsync("SETUP", _sessionUrl, BinaryPlist.Write(root), "application/x-apple-binary-plist", ct: ct);
+        if (!rst.Ok) throw new SpeakerException(SpeakerProblem.Rejected, $"Audio setup refused ({rst})");
+        var stResp = BinaryPlist.Read(rst.Body) as Dictionary<string, object>;
+        var st = (stResp?["streams"] as List<object>)?.FirstOrDefault() as Dictionary<string, object>;
+        int dataPort = (int)st.GetLong("dataPort");
+        int controlPort = (int)st.GetLong("controlPort");
+        if (dataPort == 0) throw new SpeakerException(SpeakerProblem.Rejected, "Speaker didn't give us its audio port");
+        if (controlPort > 0) ControlEndPoint = new IPEndPoint(Address, controlPort);
+        _bufData = new Socket(Address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        await _bufData.ConnectAsync(new IPEndPoint(Address, dataPort), ct);
+        _bufStream = new NetworkStream(_bufData, ownsSocket: false);
+        Log.Debug($"{Info.Name}: buffered audio, data port {dataPort} (TCP), buffer {st.GetLong("audioBufferSize")} bytes");
+    }
+
+    /// <summary>Tells a buffered speaker which RTP time plays at which moment on our PTP clock.</summary>
+    internal async Task AnchorAsync(uint rtp, long playNs)
+    {
+        if (_rtsp == null) return;
+        ulong secs = (ulong)(playNs / 1_000_000_000L);
+        ulong frac = (ulong)((playNs % 1_000_000_000L) * (Math.Pow(2, 64) / 1e9));
+        var p = new Dictionary<string, object>
+        {
+            ["rate"] = 1L, ["rtpTime"] = (long)rtp, ["networkTimeSecs"] = (long)secs, ["networkTimeFrac"] = frac,
+            ["networkTimeTimelineID"] = _engine.Ptp.ClockId, ["networkTimeFlags"] = 0L,
+        };
+        await _cmdLock.WaitAsync();
+        try
+        {
+            var r = await _rtsp.SendAsync("SETRATEANCHORTIME", _sessionUrl, BinaryPlist.Write(p), "application/x-apple-binary-plist");
+            if (!r.Ok) Log.Warn($"{Info.Name}: play timing refused ({r})");
+        }
+        catch (Exception ex) { Log.Debug($"{Info.Name}: anchor failed: {ex.Message}"); }
+        finally { _cmdLock.Release(); }
+    }
+
+    /// <summary>Sends one AAC frame over the buffered (TCP) stream.</summary>
+    internal void SendBuffered(uint rtp, byte[] aac)
+    {
+        var cipher = _audioCipher;
+        var stream = _bufStream;
+        if (cipher == null || stream == null) return;
+        var pkt = new byte[2 + 12 + aac.Length + 16 + 8];
+        lock (_bufLock)
+        {
+            uint seq = _bufSeq++ & 0x7fffff;
+            BinaryPrimitives.WriteUInt16BigEndian(pkt, (ushort)pkt.Length);
+            BinaryPrimitives.WriteUInt32BigEndian(pkt.AsSpan(2), 0x80000000u | seq);
+            BinaryPrimitives.WriteUInt32BigEndian(pkt.AsSpan(6), rtp);
+            BinaryPrimitives.WriteUInt32BigEndian(pkt.AsSpan(10), 0x16000000);
+            Span<byte> nonce = stackalloc byte[12];
+            nonce.Clear();
+            BinaryPrimitives.WriteUInt64LittleEndian(nonce[4..], seq);
+            cipher.Encrypt(nonce, aac, pkt.AsSpan(14, aac.Length), pkt.AsSpan(14 + aac.Length, 16), pkt.AsSpan(6, 8));
+            nonce[4..].CopyTo(pkt.AsSpan(14 + aac.Length + 16));
+            try { stream.Write(pkt); }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or SocketException)
+            {
+                _ = DropAsync("The speaker stopped accepting audio.");
+            }
+        }
     }
 
     private static string LocalMac(IPAddress local)
@@ -431,6 +532,8 @@ public sealed class SpeakerSession : IAsyncDisposable
         if (_ptpPeerId >= 0) { _engine.Ptp?.RemovePeer(_ptpPeerId); _ptpPeerId = -1; }
         try { _data?.Dispose(); } catch { }
         _data = null;
+        try { _bufStream?.Dispose(); _bufData?.Dispose(); } catch { }
+        _bufStream = null; _bufData = null;
         _events?.Dispose(); _events = null;
         _rtsp?.Dispose(); _rtsp = null;
         _audioCipher?.Dispose(); _audioCipher = null;

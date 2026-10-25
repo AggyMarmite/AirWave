@@ -46,6 +46,13 @@ jobs:
           python tests\windows\check_render.py "$dir\render-rx.txt" "$dir\render-tx.txt" 2>&1 | Tee-Object -FilePath "$dir\render-result.txt"
           if ($LASTEXITCODE -ne 0) { throw "Playback test failed" }
 
+      - name: AAC encoder for HomePods and Apple TVs
+        shell: pwsh
+        run: |
+          $cli = "src\AirWave.TestCli\bin\Release\net8.0\AirWave.TestCli.exe"
+          & $cli aac-delay --debug 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\selftest\aac-delay.txt"
+          if ($LASTEXITCODE -ne 0) { throw "AAC encoder not working" }
+
       - name: Screen mirroring from Windows (to a stand-in TV)
         shell: pwsh
         run: |

@@ -26,6 +26,17 @@ if (args.Length == 0 || args[0] == "discover")
     return;
 }
 
+if (args[0] == "aac-delay")
+{
+    // The AAC encoder's start-up delay, as AirWave will compensate it (Windows: measured with Media Foundation)
+    var enc = AirWave.Core.Audio.AacEncoder.Create();
+    int? d = OperatingSystem.IsWindows() ? enc.DelaySamples : AirWave.Core.Audio.AacEncoder.MeasureDelay(enc, AirWave.Core.Audio.AacDecoder.Create());
+    Console.WriteLine($"AACDELAY {enc.Name}: {d?.ToString() ?? "unknown"} samples");
+    enc.Dispose();
+    Environment.ExitCode = d is >= 0 and <= 4096 ? 0 : 1;
+    return;
+}
+
 if (args[0] == "play")
 {
     int seconds = 10;
@@ -35,7 +46,7 @@ if (args[0] == "play")
         if (args[i] == "--seconds") seconds = int.Parse(args[++i]);
         if (args[i] == "--pcm") pcm = args[++i];
     }
-    await using var engine = new StreamEngine(enablePtp: !args.Contains("--ntp")) { ClientName = "AirWave Test", ForceNtp = args.Contains("--ntp") };
+    await using var engine = new StreamEngine(enablePtp: !args.Contains("--ntp")) { ClientName = "AirWave Test", ForceNtp = args.Contains("--ntp"), ForceBuffered = args.Contains("--buffered") };
     if (args.Contains("--delay")) engine.DelayMs = int.Parse(args[Array.IndexOf(args, "--delay") + 1]);
     engine.Source = pcm != null ? new RawPcmSource(pcm) : new ToneSource();
     int stagger = args.Contains("--stagger") ? int.Parse(args[Array.IndexOf(args, "--stagger") + 1]) : 0;
@@ -44,7 +55,9 @@ if (args[0] == "play")
     {
         if (tasks.Count > 0 && stagger > 0) await Task.Delay(stagger * 1000);
         var ep = IPEndPoint.Parse(t);
-        var info = new SpeakerInfo { Id = t, Name = t, Port = ep.Port, Features = (1UL << 9) | (1UL << 48) | (args.Contains("--ntp") ? 0 : 1UL << 41) };
+        var info = new SpeakerInfo { Id = t, Name = t, Port = ep.Port, Features = (1UL << 9) | (1UL << 48) | (1UL << 40) | (args.Contains("--ntp") ? 0 : 1UL << 41) };
+        // --homepod2: treat the second speaker as a HomePod (gets buffered AAC, like from an iPhone)
+        if (args.Contains("--homepod2") && tasks.Count == 1) info.Model = "AudioAccessory5,1";
         info.Addresses.Add(ep.Address);
         tasks.Add(engine.AddSpeakerAsync(info, 0.8));
     }

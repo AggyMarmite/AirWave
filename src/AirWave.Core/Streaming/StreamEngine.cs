@@ -52,6 +52,12 @@ public sealed class StreamEngine : IAsyncDisposable
     public string GroupUuid { get; } = Guid.NewGuid().ToString().ToUpperInvariant();
     public string PtpClockUuid { get; } = Guid.NewGuid().ToString().ToUpperInvariant();
     public bool ForceNtp { get; set; }
+    /// <summary>Send buffered AAC to every speaker that supports it, not just Apple ones (tests).</summary>
+    public bool ForceBuffered { get; set; }
+
+    /// <summary>Apple speakers and TVs get buffered audio, as from an iPhone; others get realtime ALAC.</summary>
+    internal bool WantsBuffered(SpeakerInfo info) =>
+        info.SupportsBufferedAudio && (ForceBuffered || info.IsHomePod || info.IsAppleTv || info.IsMac);
 
     /// <summary>How far ahead of the speakers' playback the audio is sent (ms). Bigger copes better with weak Wi-Fi.</summary>
     public int DelayMs { get; set; } = 1500;
@@ -104,6 +110,7 @@ public sealed class StreamEngine : IAsyncDisposable
     {
         ms = Math.Clamp(ms, -MaxOffsetMs, MaxOffsetMs);
         if (ms == 0) _offsets.TryRemove(id, out _); else _offsets[id] = ms;
+        if (_sessions.TryGetValue(id, out var s) && s.Buffered) s.NeedsAnchor = true; // buffered speakers take it as a new anchor
     }
 
     public int GetSpeakerOffset(string id) => _offsets.TryGetValue(id, out var ms) ? ms : 0;
@@ -234,6 +241,7 @@ public sealed class StreamEngine : IAsyncDisposable
             foreach (var s in _sessions.Values)
             {
                 if (s.State is not (SpeakerState.Ready or SpeakerState.Streaming)) continue;
+                if (s.Buffered) continue; // fed below
                 if (s.NeedsStart)
                 {
                     s.NeedsStart = false;
@@ -248,9 +256,85 @@ public sealed class StreamEngine : IAsyncDisposable
                 if (TestDrop > 0 && _rng.NextDouble() < TestDrop) continue;
                 s.SendAudio(header, payload.AsSpan(0, len), seq);
             }
+            FeedBuffered(pcm, _packetIndex);
             _packetIndex++;
         }
     }
+
+    // ------------------------------------------------------------------ buffered (AAC) speakers
+
+    private const long RealtimeLatencyNs = 11025L * 1_000_000_000L / Sr;
+    private IAacEncoder _aac;
+    private long _aacStartSample, _aacFramesOut;
+    private readonly short[] _aacPcm = new short[1024 * 2];
+    private int _aacFill;
+
+    /// <summary>
+    /// Buffered speakers get the same timeline as the realtime ones, as AAC: RTP time = _rtpBase + sample index,
+    /// heard at _t0 + DelayMs + index/44100 — so both kinds play in step. The encoder's start-up delay is taken off.
+    /// </summary>
+    private void FeedBuffered(short[] pcm, long packetIndex)
+    {
+        bool any = false;
+        foreach (var s in _sessions.Values)
+            if (s.Buffered && s.State is SpeakerState.Ready or SpeakerState.Streaming) { any = true; break; }
+        if (!any)
+        {
+            if (_aac != null) { _aac.Dispose(); _aac = null; }
+            return;
+        }
+        long sample = packetIndex * Spp;
+        if (_aac == null || sample != _aacStartSample + _aacFramesOut * 1024 + _aacLag + _aacFill)
+        {
+            // (Re)start the encoder at this point of the timeline (first speaker, or after the timeline jumped)
+            _aac?.Dispose();
+            try { _aac = AacEncoder.Create(); }
+            catch (Exception ex) { Log.Error($"No AAC encoder for HomePods/Apple TVs: {ex.Message}"); return; }
+            Log.Debug($"Buffered audio: {_aac.Name}, start-up delay {_aac.DelaySamples} samples");
+            _aacStartSample = sample;
+            _aacFramesOut = 0;
+            _aacFill = 0;
+            _aacLag = 0;
+        }
+
+        // Anchors first, so a speaker knows the timing before (or as) its first frames arrive
+        foreach (var s in _sessions.Values)
+        {
+            if (!s.Buffered || s.State is not (SpeakerState.Ready or SpeakerState.Streaming) || !s.NeedsAnchor) continue;
+            s.NeedsAnchor = false;
+            uint aRtp = (uint)(_rtpBase + sample);
+            // Realtime speakers add the stream's 11025-sample (250 ms) latency to the sync packets' timing; buffered
+            // anchors are exact, so add the same here and both kinds play together
+            long aNs = _t0 + PacketNs(packetIndex) + (DelayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L + RealtimeLatencyNs;
+            _ = s.AnchorAsync(aRtp, aNs);
+            s.MarkStreaming();
+        }
+
+        int i = 0;
+        while (i < Spp)
+        {
+            int n = Math.Min(Spp - i, 1024 - _aacFill);
+            Array.Copy(pcm, i * 2, _aacPcm, _aacFill * 2, n * 2);
+            _aacFill += n; i += n;
+            if (_aacFill < 1024) break;
+            _aacFill = 0;
+            _aacLag += 1024;
+            List<byte[]> frames;
+            try { frames = _aac.Encode(_aacPcm); }
+            catch (Exception ex) { Log.Warn($"AAC encoding failed: {ex.Message}"); _aac.Dispose(); _aac = null; return; }
+            foreach (var f in frames)
+            {
+                _aacLag -= 1024;
+                uint frtp = (uint)(_rtpBase + _aacStartSample + _aacFramesOut * 1024 - _aac.DelaySamples);
+                _aacFramesOut++;
+                foreach (var s in _sessions.Values)
+                    if (s.Buffered && s.State == SpeakerState.Streaming) s.SendBuffered(frtp, f);
+            }
+        }
+    }
+
+    // Samples handed to the encoder that haven't come out yet (so the continuity check above can tell a jump)
+    private long _aacLag;
 
     /// <summary>
     /// Sync packet: "RTP time X is heard at clock time T". X is derived from the timeline itself

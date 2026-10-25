@@ -82,6 +82,10 @@ if [[ "$MODE" == "buffered" ]]; then
     grep -q "DACP GET /ctrl-int/1/playpause HTTP/1.1 active-remote=1986535575" $WORK/play.txt || { echo "FAIL: sender didn't get the play/pause command"; exit 1; }
     echo "PASS: now playing (title, artist, album, artwork, position) and play/pause back to the sender"
   fi
+elif [[ "$MODE" == "send-buffered" ]]; then
+  # AirWave as the sender: Shairport Sync gets realtime ALAC, AirWave's receiver is treated as a HomePod and gets
+  # buffered AAC (as AirWave now sends to HomePods and Apple TVs). Both must play in step.
+  $CLI play 10.91.0.2:7000,10.92.0.2:7000 --seconds 14 --delay 2000 --homepod2 ${STAGGER:+--stagger $STAGGER} ${OFFSET2:+--offset2 $OFFSET2 --offset-after 9} --debug 2>&1 | tee "$WORK/play.txt" | grep -E "SESSION|END|ready|Buffered audio" || true
 else
   $CLI play 10.91.0.2:7000,10.92.0.2:7000 --seconds 14 --delay 2000 | tee "$WORK/play.txt" | grep -E "SESSION|END" || true
 fi
