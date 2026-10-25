@@ -149,7 +149,21 @@ internal sealed class RtspConnection : IDisposable
 
     private Response Handle(Request r)
     {
-        Log.Debug($"AirPlay <- {r.Method} {r.Path} ({r.Body.Length} bytes)");
+        var resp = HandleCore(r);
+        if (Log.MinLevel <= LogLevel.Debug)
+        {
+            // Everything a phone or Mac sends (except pairing secrets), as a reference for what Apple devices expect
+            bool secret = r.Path is "/pair-setup" or "/pair-verify" or "/fp-setup" or "/pair-pin-start";
+            var hdr = string.Join(", ", r.Headers.Where(h => h.Key is not ("CSeq" or "Content-Length")).Select(h => $"{h.Key}: {h.Value}"));
+            string body = secret ? $"<{r.Body.Length} bytes>" : AirWave.Core.Plist.PlistText.DescribeBody(r.Body, 1500);
+            string rbody = secret || resp.Body == null ? "" : AirWave.Core.Plist.PlistText.DescribeBody(resp.Body, 800);
+            Log.Debug($"AirPlay <- {r.Method} {r.Path} [{hdr}] {body} -> {resp.Status} {rbody}");
+        }
+        return resp;
+    }
+
+    private Response HandleCore(Request r)
+    {
         try
         {
             switch (r.Method)

@@ -47,7 +47,18 @@ public sealed class SpeakerSession : IAsyncDisposable
     /// AirPlay 2 "buffered" audio (AAC over TCP, anchored with SETRATEANCHORTIME) — what iPhones send to HomePods
     /// and Apple TVs, which ignore the realtime stream unless it arrives just in time. Others get realtime ALAC.
     /// </summary>
-    public bool Buffered { get; private set; }
+    public bool Buffered => Style is StreamStyle.Buffered or StreamStyle.BufferedLateAnchor;
+    public StreamStyle Style { get; private set; }
+    /// <summary>The speaker's last reply to our keep-alive (it lists the streams it's playing).</summary>
+    public string LastFeedback { get; private set; }
+    /// <summary>The speaker's reply to the last play-at time we sent (buffered audio).</summary>
+    public string AnchorReply { get; private set; }
+    /// <summary>The speaker's own PTP clock (from its SETUP reply), followed when we let it keep time.</summary>
+    public ulong SpeakerClockId { get; private set; }
+    /// <summary>Realtime packets held back to go out just as they're due (<see cref="StreamStyle.RealtimeJustInTime"/>).</summary>
+    internal readonly Queue<(byte[] Header, byte[] Payload, ushort Seq, uint Rtp, long DueNs)> JitQueue = new();
+    internal bool JitStarted;
+    internal uint JitLastSyncRtp;
     /// <summary>Set when a buffered speaker needs (re)anchoring: on start, and when its timing nudge changes.</summary>
     internal volatile bool NeedsAnchor;
     private Socket _bufData;
@@ -90,7 +101,7 @@ public sealed class SpeakerSession : IAsyncDisposable
             await SetupAsync(ct);
             NeedsStart = true;
             SetState(SpeakerState.Ready);
-            Log.Info($"{Info.Name}: ready ({(UsesPtp ? "PTP" : "NTP")} timing, {(Buffered ? "buffered AAC" : "realtime ALAC")})");
+            Log.Info($"{Info.Name}: ready ({(UsesPtp ? "PTP" : "NTP")} timing{(_engine.Ptp?.Yield == true ? ", following the speaker's clock" : "")}, {Style switch { StreamStyle.Buffered => "buffered AAC", StreamStyle.BufferedLateAnchor => "buffered AAC, late start", StreamStyle.RealtimeJustInTime => "realtime ALAC, just in time", _ => "realtime ALAC" }})");
             _keepAlive = new Timer(_ => _ = KeepAliveAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
             return true;
         }
@@ -265,6 +276,7 @@ public sealed class SpeakerSession : IAsyncDisposable
             {
                 foreach (var a in list.OfType<string>())
                     if (IPAddress.TryParse(a.Split('%')[0], out var ip) && ip.AddressFamily == Address.AddressFamily) { peerAddr = ip; break; }
+                if (tp.TryGetValue("ClockID", out var cid)) SpeakerClockId = cid switch { long l => unchecked((ulong)l), ulong u => u, _ => 0 };
             }
             _ptpPeerId = _engine.Ptp.AddPeer(peerAddr);
         }
@@ -287,13 +299,14 @@ public sealed class SpeakerSession : IAsyncDisposable
             if (!rp.Ok) Log.Debug($"{Info.Name}: SETPEERS answered {rp}");
         }
 
-        Buffered = UsesPtp && _engine.WantsBuffered(Info);
+        Style = _engine.StyleFor(Info, UsesPtp);
         if (Buffered) await SetupBufferedStreamAsync(ct);
         else await SetupRealtimeStreamAsync(ct);
 
         // Volume last: some speakers (e.g. Sonos) ignore it otherwise
         await SendVolumeAsync(Volume, ct);
-        if (Buffered) NeedsAnchor = true;
+        if (Style == StreamStyle.BufferedLateAnchor) _ = Task.Delay(3000).ContinueWith(_ => NeedsAnchor = true);
+        else if (Buffered) NeedsAnchor = true;
     }
 
     private async Task SetupRealtimeStreamAsync(CancellationToken ct)
@@ -365,7 +378,15 @@ public sealed class SpeakerSession : IAsyncDisposable
     }
 
     /// <summary>Tells a buffered speaker which RTP time plays at which moment on our PTP clock.</summary>
-    internal async Task AnchorAsync(uint rtp, long playNs)
+    /// <returns>False if the speaker's clock isn't known yet (try again shortly).</returns>
+    internal bool TryAnchor(uint rtp, long playNs)
+    {
+        if (!_engine.TryRemoteTime(this, playNs, out long remoteNs, out ulong timeline)) return false;
+        _ = AnchorAsync(rtp, remoteNs, timeline);
+        return true;
+    }
+
+    internal async Task AnchorAsync(uint rtp, long playNs, ulong timeline)
     {
         if (_rtsp == null) return;
         ulong secs = (ulong)(playNs / 1_000_000_000L);
@@ -373,13 +394,14 @@ public sealed class SpeakerSession : IAsyncDisposable
         var p = new Dictionary<string, object>
         {
             ["rate"] = 1L, ["rtpTime"] = (long)rtp, ["networkTimeSecs"] = (long)secs, ["networkTimeFrac"] = frac,
-            ["networkTimeTimelineID"] = _engine.Ptp.ClockId, ["networkTimeFlags"] = 0L,
+            ["networkTimeTimelineID"] = timeline, ["networkTimeFlags"] = 0L,
         };
         await _cmdLock.WaitAsync();
         try
         {
             var r = await _rtsp.SendAsync("SETRATEANCHORTIME", _sessionUrl, BinaryPlist.Write(p), "application/x-apple-binary-plist");
             if (!r.Ok) Log.Warn($"{Info.Name}: play timing refused ({r})");
+            AnchorReply = $"{r.Status} {Plist.PlistText.DescribeBody(r.Body, 200)}".Trim();
         }
         catch (Exception ex) { Log.Debug($"{Info.Name}: anchor failed: {ex.Message}"); }
         finally { _cmdLock.Release(); }
@@ -490,6 +512,7 @@ public sealed class SpeakerSession : IAsyncDisposable
         {
             var r = await _rtsp.SendAsync("POST", "/feedback", timeoutMs: 5000);
             if (r.Status != 200) Log.Debug($"{Info.Name}: feedback answered {r}");
+            LastFeedback = $"{r.Status} {Plist.PlistText.DescribeBody(r.Body, 300)}";
         }
         catch (Exception ex)
         {

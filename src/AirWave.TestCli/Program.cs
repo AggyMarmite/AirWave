@@ -26,6 +26,22 @@ if (args.Length == 0 || args[0] == "discover")
     return;
 }
 
+if (args[0] == "lab")
+{
+    // Speaker test against one speaker: "lab ip:port [--homepod] [--seconds N]"
+    var ep = IPEndPoint.Parse(args[1]);
+    await using var engine = new StreamEngine(enablePtp: true) { ClientName = "AirWave Test", DelayMs = 2000 };
+    var info = new SpeakerInfo { Id = args[1], Name = args[1], Port = ep.Port, Features = (1UL << 9) | (1UL << 48) | (1UL << 40) | (1UL << 41) };
+    if (args.Contains("--homepod")) info.Model = "AudioAccessory5,1";
+    info.Addresses.Add(ep.Address);
+    int secs = args.Contains("--seconds") ? int.Parse(args[Array.IndexOf(args, "--seconds") + 1]) : 8;
+    var results = await AirWave.Core.Streaming.SpeakerLab.RunAsync(engine, info, 0.8, secs,
+        (n, line) => Console.WriteLine($"LABTEST {n} monotonic {System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency:F6} {line}"),
+        CancellationToken.None);
+    foreach (var r in results) Console.WriteLine("RESULT " + r);
+    return;
+}
+
 if (args[0] == "aac-delay")
 {
     // The AAC encoder's start-up delay, as AirWave will compensate it (Windows: measured with Media Foundation)

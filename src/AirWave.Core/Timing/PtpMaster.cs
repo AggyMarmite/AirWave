@@ -27,6 +27,12 @@ public sealed class PtpMaster : IDisposable
 
     public ulong ClockId { get; }
 
+    /// <summary>
+    /// Let the speakers keep time instead of us (as a Mac does with HomePods): announce ourselves as an ordinary clock
+    /// that loses to theirs, and stop sending Sync. The speaker becomes the timekeeper; we follow it.
+    /// </summary>
+    public bool Yield { get; set; }
+
     /// <summary>PTP messages from other clocks (e.g. an iPhone that is streaming to us), with our receive time.</summary>
     public event Action<byte[], long, IPAddress> ForeignMessage;
     public bool IsRunning { get; }
@@ -124,7 +130,7 @@ public sealed class PtpMaster : IDisposable
         Log.Debug($"PTP: added peer {address}");
         // Get the new speaker locked on quickly instead of waiting for the next timer tick
         SendAnnounce();
-        SendSync();
+        if (!Yield) SendSync();
         return id;
     }
 
@@ -153,7 +159,7 @@ public sealed class PtpMaster : IDisposable
                 SendSignaling();
                 nextAnnounce = now + 1000;
             }
-            if (now >= nextSync)
+            if (now >= nextSync && !Yield)
             {
                 SendSync();
                 nextSync = now + 125;
@@ -227,12 +233,12 @@ public sealed class PtpMaster : IDisposable
         Header(m, 0x0B, _announceSeq++, 0, 0x0408);
         // originTimestamp 0 (as iOS)
         // currentUtcOffset(2)=0, reserved(1)=0
-        m[47] = 128; // priority1
-        BinaryPrimitives.WriteUInt32BigEndian(m.AsSpan(48), 0x06210000 | 0x436A); // clock quality
-        m[52] = 128; // priority2
+        m[47] = Yield ? (byte)250 : (byte)128; // priority1 (250 = a Mac's, which loses to a HomePod's 248)
+        BinaryPrimitives.WriteUInt32BigEndian(m.AsSpan(48), Yield ? 0xF8FE436Au : 0x06210000 | 0x436A); // clock quality
+        m[52] = Yield ? (byte)248 : (byte)128; // priority2
         BinaryPrimitives.WriteUInt64BigEndian(m.AsSpan(53), ClockId); // grandmasterIdentity
         // stepsRemoved(2)=0
-        m[63] = 0x20; // timeSource GPS
+        m[63] = Yield ? (byte)0xA0 : (byte)0x20; // timeSource: internal oscillator / GPS
         BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(64), 0x0008); // path trace TLV
         BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(66), 8);
         BinaryPrimitives.WriteUInt64BigEndian(m.AsSpan(68), ClockId);

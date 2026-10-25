@@ -68,6 +68,25 @@ echo "== discovery (AirWave receiver advertises itself)"
 $CLI discover 5 | tee discover.txt | grep FOUND || true
 grep -q "E2E-AirWave" discover.txt || { echo "FAIL: AirWave receiver not discovered"; exit 1; }
 
+if [[ "$MODE" == "lab" ]]; then
+  # Speaker test against Shairport Sync (rx1) and AirWave's receiver (rx2, treated as a HomePod), one after the other
+  python3 "$HERE/sync_measure.py" 115 "$WORK/rx1.pcm" "$WORK/rx2.pcm:s16:44100" > "$WORK/lab-sync.txt" &
+  MPID=$!
+  $CLI lab 10.91.0.2:7000 --seconds 5 --debug > "$WORK/lab1.txt" 2>&1
+  $CLI lab 10.92.0.2:7000 --homepod --seconds 5 --debug > "$WORK/lab2.txt" 2>&1
+  wait $MPID
+  python3 - "$WORK/lab-sync.txt" "$WORK/lab1.txt" "$WORK/lab2.txt" <<'PYL'
+import sys, re
+t = open(sys.argv[1]).read()
+for rx, f in (("rx1", sys.argv[2]), ("rx2", sys.argv[3])):
+    on = [float(x) for x in (re.search(rx + r" onsets: (.*)", t).group(1).split() if re.search(rx + r" onsets: (.*)", t) else [])]
+    marks = [(int(n), float(ts)) for n, ts in re.findall(r"LABTEST (\d+) monotonic ([\d.]+)", open(f).read())]
+    marks.append((0, 1e12))
+    print(rx, " ".join(f"test{n}:{sum(1 for o in on if a <= o < b)}" for (n, a), (_, b) in zip(marks, marks[1:])))
+PYL
+  grep RESULT "$WORK/lab1.txt" "$WORK/lab2.txt"
+  exit 0
+fi
 echo "== $MODE stream to Shairport Sync and AirWave together"
 python3 "$HERE/sync_measure.py" 18 "$WORK/rx1.pcm" "$WORK/rx2.pcm:s16:44100" > "$WORK/rsync.txt" &
 MPID=$!

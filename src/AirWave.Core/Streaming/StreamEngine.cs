@@ -55,6 +55,34 @@ public sealed class StreamEngine : IAsyncDisposable
     /// <summary>Send buffered AAC to every speaker that supports it, not just Apple ones (tests).</summary>
     public bool ForceBuffered { get; set; }
 
+    /// <summary>Overrides how each speaker is sent audio (the speaker test tries each way in turn).</summary>
+    public Func<SpeakerInfo, StreamStyle?> StyleOverride { get; set; }
+
+    internal StreamStyle StyleFor(SpeakerInfo info, bool ptp)
+    {
+        var o = StyleOverride?.Invoke(info);
+        if (o is StreamStyle st && (ptp || st is StreamStyle.RealtimeAhead or StreamStyle.RealtimeJustInTime)) return st;
+        return ptp && WantsBuffered(info) ? StreamStyle.Buffered : StreamStyle.RealtimeAhead;
+    }
+
+    /// <summary>Follows the speakers' clocks, for when we let them keep time (<see cref="PtpMaster.Yield"/>).</summary>
+    public PtpFollower Follower { get; }
+
+    /// <summary>
+    /// Our clock time → the time on the timeline this speaker uses: ours, or (when yielding) the speaker's own.
+    /// False if we haven't followed the speaker's clock for long enough yet.
+    /// </summary>
+    internal bool TryRemoteTime(SpeakerSession s, long localNs, out long remoteNs, out ulong timeline)
+    {
+        remoteNs = localNs; timeline = Ptp?.ClockId ?? 0;
+        if (Ptp == null || !Ptp.Yield || !s.UsesPtp) return true;
+        var off = Follower.GetOffset(s.SpeakerClockId, out long followed);
+        if (off == null || followed < 500_000_000L) return false;
+        remoteNs = localNs + off.Value;
+        timeline = s.SpeakerClockId;
+        return true;
+    }
+
     /// <summary>Apple speakers and TVs get buffered audio, as from an iPhone; others get realtime ALAC.</summary>
     internal bool WantsBuffered(SpeakerInfo info) =>
         info.SupportsBufferedAudio && (ForceBuffered || info.IsHomePod || info.IsAppleTv || info.IsMac);
@@ -94,7 +122,7 @@ public sealed class StreamEngine : IAsyncDisposable
         _control = UdpHelpers.CreateDualMode(0);
         ControlPort = ((IPEndPoint)_control.Client.LocalEndPoint).Port;
         Ntp = new NtpTimingServer();
-        if (enablePtp) Ptp = new PtpMaster();
+        if (enablePtp) { Ptp = new PtpMaster(); Follower = new PtpFollower(Ptp, wake: false); }
         _ = Task.Run(ControlLoop);
     }
 
@@ -242,6 +270,13 @@ public sealed class StreamEngine : IAsyncDisposable
             {
                 if (s.State is not (SpeakerState.Ready or SpeakerState.Streaming)) continue;
                 if (s.Buffered) continue; // fed below
+                if (s.Style == StreamStyle.RealtimeJustInTime)
+                {
+                    // Held back and sent as each packet falls due (below)
+                    long dueNs = _t0 + PacketNs(_packetIndex) + DelayMs * 1_000_000L;
+                    lock (s.JitQueue) s.JitQueue.Enqueue(((byte[])header.Clone(), payload.AsSpan(0, len).ToArray(), seq, rtp, dueNs));
+                    continue;
+                }
                 if (s.NeedsStart)
                 {
                     s.NeedsStart = false;
@@ -257,7 +292,46 @@ public sealed class StreamEngine : IAsyncDisposable
                 s.SendAudio(header, payload.AsSpan(0, len), seq);
             }
             FeedBuffered(pcm, _packetIndex);
+            SendJustInTime();
             _packetIndex++;
+        }
+    }
+
+    // ------------------------------------------------------------------ just-in-time realtime speakers
+
+    /// <summary>
+    /// The way another open-source sender plays to HomePod minis: each packet goes out as it's due, with a sync packet
+    /// saying "this packet's RTP time is now" (the speaker adds its own latency).
+    /// </summary>
+    private void SendJustInTime()
+    {
+        long now = MonoClock.NowNs;
+        foreach (var s in _sessions.Values)
+        {
+            if (s.Style != StreamStyle.RealtimeJustInTime || s.State is not (SpeakerState.Ready or SpeakerState.Streaming)) continue;
+            while (true)
+            {
+                (byte[] Header, byte[] Payload, ushort Seq, uint Rtp, long DueNs) p;
+                lock (s.JitQueue) { if (s.JitQueue.Count == 0 || s.JitQueue.Peek().DueNs > now) break; p = s.JitQueue.Dequeue(); }
+                bool first = !s.JitStarted;
+                if (first || (p.Rtp - s.JitLastSyncRtp) >= Sr)
+                {
+                    if (!TryRemoteTime(s, now, out long remote, out ulong clock)) { if (first) { lock (s.JitQueue) s.JitQueue.Clear(); } break; }
+                    var pkt = new byte[28];
+                    pkt[0] = first ? (byte)0x90 : (byte)0x80;
+                    pkt[1] = 0xd7;
+                    pkt[3] = 0x06;
+                    BinaryPrimitives.WriteUInt32BigEndian(pkt.AsSpan(4), p.Rtp);
+                    BinaryPrimitives.WriteUInt64BigEndian(pkt.AsSpan(8), (ulong)remote);
+                    BinaryPrimitives.WriteUInt32BigEndian(pkt.AsSpan(16), p.Rtp + Spp);
+                    BinaryPrimitives.WriteUInt64BigEndian(pkt.AsSpan(20), clock);
+                    if (s.ControlEndPoint != null)
+                        try { _control.Client.SendTo(pkt, UdpHelpers.ForSocket(_control.Client, s.ControlEndPoint)); } catch { }
+                    s.JitLastSyncRtp = p.Rtp;
+                }
+                if (first) { p.Header[1] = 0xE0; s.JitStarted = true; s.MarkStreaming(); }
+                s.SendAudio(p.Header, p.Payload, p.Seq);
+            }
         }
     }
 
@@ -301,12 +375,12 @@ public sealed class StreamEngine : IAsyncDisposable
         foreach (var s in _sessions.Values)
         {
             if (!s.Buffered || s.State is not (SpeakerState.Ready or SpeakerState.Streaming) || !s.NeedsAnchor) continue;
-            s.NeedsAnchor = false;
             uint aRtp = (uint)(_rtpBase + sample);
             // Realtime speakers add the stream's 11025-sample (250 ms) latency to the sync packets' timing; buffered
             // anchors are exact, so add the same here and both kinds play together
             long aNs = _t0 + PacketNs(packetIndex) + (DelayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L + RealtimeLatencyNs;
-            _ = s.AnchorAsync(aRtp, aNs);
+            if (!s.TryAnchor(aRtp, aNs)) continue; // speaker's clock not followed yet: next time round
+            s.NeedsAnchor = false;
             s.MarkStreaming();
         }
 
@@ -344,6 +418,7 @@ public sealed class StreamEngine : IAsyncDisposable
     {
         if (s.ControlEndPoint == null) return;
         long now = MonoClock.NowNs;
+        if (!TryRemoteTime(s, now, out long remoteNow, out ulong timelineClock)) return;
         long delayNs = (DelayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L;
         // The sample that should be playing right now
         long elapsed = now - _t0 - delayNs;
@@ -357,9 +432,9 @@ public sealed class StreamEngine : IAsyncDisposable
             pkt[1] = 0xd7;
             pkt[3] = 0x06;
             BinaryPrimitives.WriteUInt32BigEndian(pkt.AsSpan(4), curRtp);
-            BinaryPrimitives.WriteUInt64BigEndian(pkt.AsSpan(8), (ulong)now);
+            BinaryPrimitives.WriteUInt64BigEndian(pkt.AsSpan(8), (ulong)remoteNow);
             BinaryPrimitives.WriteUInt32BigEndian(pkt.AsSpan(16), nextRtp - 11025);
-            BinaryPrimitives.WriteUInt64BigEndian(pkt.AsSpan(20), Ptp.ClockId);
+            BinaryPrimitives.WriteUInt64BigEndian(pkt.AsSpan(20), timelineClock);
         }
         else
         {

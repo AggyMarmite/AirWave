@@ -121,6 +121,12 @@ internal static class SelfTest
             Snap(w, Path.Combine(dir, "10-settings-updates.png"));
             w.ShowSettings(false);
 
+            // Speaker test panel
+            app.Controller.LabVisible = true;
+            await Task.Delay(400);
+            Snap(w, Path.Combine(dir, "12-speaker-test.png"));
+            app.Controller.LabVisible = false;
+
             // Bigger window, to check the layout stretches nicely
             w.Width = 560; w.Height = 820;
             await Task.Delay(500);

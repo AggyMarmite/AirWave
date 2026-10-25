@@ -30,9 +30,13 @@ public sealed class PtpFollower
 
     private readonly PtpMaster _sockets;
 
-    public PtpFollower(PtpMaster sockets)
+    private readonly bool _wake;
+
+    /// <param name="wake">Say hello to new clocks (the receiver does; a passive observer doesn't).</param>
+    public PtpFollower(PtpMaster sockets, bool wake = true)
     {
         _sockets = sockets;
+        _wake = wake;
         if (sockets != null) sockets.ForeignMessage += OnMessage;
     }
 
@@ -100,7 +104,7 @@ public sealed class PtpFollower
     /// </summary>
     private void Wake(Clock c, IPAddress to)
     {
-        if (_sockets == null || !_sockets.IsRunning) return;
+        if (_sockets == null || !_sockets.IsRunning || !_wake) return;
         // Never to a speaker we're sending to: there we are the timekeeper, and mixed messages would confuse it
         if (_sockets.IsPeer(to)) return;
         byte p1 = c.Priority1, p2 = c.Priority2;

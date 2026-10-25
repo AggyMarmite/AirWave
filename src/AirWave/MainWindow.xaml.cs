@@ -109,6 +109,11 @@ public partial class MainWindow : Window
     private async void RemoteNext_Click(object sender, RoutedEventArgs e) => await _app.RemoteAsync(AirWave.Core.Receiver.RemoteCommand.Next);
     private async void RemotePrevious_Click(object sender, RoutedEventArgs e) => await _app.RemoteAsync(AirWave.Core.Receiver.RemoteCommand.Previous);
 
+    private void OpenLab_Click(object sender, RoutedEventArgs e) => _app.LabVisible = true;
+    private void LabClose_Click(object sender, RoutedEventArgs e) => _app.LabVisible = false;
+    private void LabStop_Click(object sender, RoutedEventArgs e) => _app.StopLab();
+    private async void LabStart_Click(object sender, RoutedEventArgs e) => await _app.RunLabAsync();
+
     private void ResetTiming_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is SpeakerViewModel vm) vm.OffsetMs = 0;

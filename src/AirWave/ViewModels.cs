@@ -149,7 +149,7 @@ public sealed class SpeakerViewModel : Observable
             case SpeakerState.Ready:
             case SpeakerState.Streaming:
                 State = SpeakerUiState.Playing;
-                Status = $"Playing · {(s.UsesPtp ? "PTP" : "NTP")} sync";
+                Status = $"Playing · {(s.UsesPtp ? "PTP" : "NTP")} sync · {(s.Buffered ? "buffered" : "realtime")}";
                 break;
             case SpeakerState.Failed:
                 State = SpeakerUiState.Problem;

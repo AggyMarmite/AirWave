@@ -615,6 +615,7 @@
                             <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource BaseButton}" Content="Copy diagnostics" Click="CopyLog_Click" Margin="0,0,8,0"/>
+                                <Button Style="{StaticResource BaseButton}" Content="Test a speaker" Click="OpenLab_Click" Margin="0,0,8,0"/>
                                 <Button Style="{StaticResource BaseButton}" Content="Open settings folder" Click="OpenFolder_Click"/>
                             </StackPanel>
                             <TextBlock x:Name="CopyDone" Style="{StaticResource Muted}" Margin="0,8,0,0" Visibility="Collapsed" Text="Copied – paste it into a GitHub issue if you need help."/>
@@ -628,6 +629,27 @@
                             <TextBlock Style="{StaticResource Muted}" Text="Play your PC's sound on AirPlay 2 speakers, in sync."/>
                         </StackPanel>
                     </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ===================== Speaker test ===================== -->
+        <Grid x:Name="LabPanel" Background="{StaticResource BgBrush}" Visibility="{Binding LabVisible, Converter={StaticResource Vis}}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="20,16,20,20">
+                    <TextBlock Text="Test a speaker" Style="{StaticResource Title}" FontSize="18"/>
+                    <TextBlock Style="{StaticResource Muted}" Margin="0,6,0,14" TextWrapping="Wrap"
+                               Text="Plays beeps to one speaker in each of the ways AirWave can send audio, about 10 seconds each. Test 1 beeps once at a time, test 2 twice, and so on. Note which numbers you hear. Other speakers are switched off while it runs."/>
+                    <TextBlock Text="Speaker" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <ComboBox x:Name="LabSpeakerBox" ItemsSource="{Binding Speakers}" SelectedItem="{Binding LabSpeaker, Mode=TwoWay}" DisplayMemberPath="Name" IsEnabled="{Binding LabNotRunning}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                        <Button x:Name="LabStartButton" Style="{StaticResource AccentButton}" Content="Start test" Padding="16,8" Click="LabStart_Click" IsEnabled="{Binding LabNotRunning}" Margin="0,0,8,0"/>
+                        <Button Style="{StaticResource BaseButton}" Content="Stop" Click="LabStop_Click" IsEnabled="{Binding LabRunning}" Margin="0,0,8,0"/>
+                        <Button Style="{StaticResource BaseButton}" Content="Close" Click="LabClose_Click" IsEnabled="{Binding LabNotRunning}"/>
+                    </StackPanel>
+                    <TextBlock x:Name="LabStatusText" Text="{Binding LabStatus}" FontSize="20" FontWeight="SemiBold" Margin="0,18,0,10" TextWrapping="Wrap"/>
+                    <TextBox x:Name="LabResultsBox" Text="{Binding LabResults, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" MinHeight="160"
+                             VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                 </StackPanel>
             </ScrollViewer>
         </Grid>

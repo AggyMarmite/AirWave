@@ -966,6 +966,49 @@ public sealed class AppController : Observable, IAsyncDisposable
         _ = Task.Delay(600, token).ContinueWith(t => { if (!t.IsCanceled) Settings.Save(); }, TaskScheduler.Default);
     }
 
+    // ------------------------------------------------------------------ speaker test
+
+    private bool _labVisible, _labRunning;
+    private string _labStatus = "", _labResults = "";
+    private SpeakerViewModel _labSpeaker;
+    private CancellationTokenSource _labCts;
+
+    public bool LabVisible { get => _labVisible; set => Set(ref _labVisible, value); }
+    public bool LabRunning { get => _labRunning; private set { if (Set(ref _labRunning, value)) Raise(nameof(LabNotRunning)); } }
+    public bool LabNotRunning => !_labRunning;
+    public string LabStatus { get => _labStatus; private set => Set(ref _labStatus, value); }
+    public string LabResults { get => _labResults; private set => Set(ref _labResults, value); }
+    public SpeakerViewModel LabSpeaker { get => _labSpeaker; set => Set(ref _labSpeaker, value); }
+
+    public void StopLab() => _labCts?.Cancel();
+
+    public async Task RunLabAsync()
+    {
+        var vm = _labSpeaker;
+        if (vm == null || _labRunning) { LabStatus = "Choose a speaker first."; return; }
+        LabRunning = true;
+        LabResults = "";
+        _labCts = new CancellationTokenSource();
+        foreach (var s in Speakers) { s.SetOnSilently(false); s.State = SpeakerUiState.Off; s.Status = s.DefaultStatus; }
+        RestorePcMute();
+        var lines = new System.Text.StringBuilder();
+        try
+        {
+            var results = await AirWave.Core.Streaming.SpeakerLab.RunAsync(_engine, vm.Info, Math.Max(0.4, EffectiveVolume(vm)), 7,
+                (n, line) => _ui.InvokeAsync(() => LabStatus = line), _labCts.Token);
+            foreach (var r in results) lines.AppendLine(r.ToString()).AppendLine();
+            LabStatus = "Finished. Which test numbers did you hear?";
+        }
+        catch (OperationCanceledException) { LabStatus = "Stopped."; }
+        catch (Exception ex) { LabStatus = "The test stopped: " + ex.Message; }
+        finally
+        {
+            LabResults = lines.ToString();
+            LabRunning = false;
+            UpdateStatusLine();
+        }
+    }
+
     // ------------------------------------------------------------------ updates
 
     private DispatcherTimer _updateTimer;
