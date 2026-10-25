@@ -101,6 +101,10 @@ if [[ "$MODE" == "buffered" ]]; then
     grep -q "DACP GET /ctrl-int/1/playpause HTTP/1.1 active-remote=1986535575" $WORK/play.txt || { echo "FAIL: sender didn't get the play/pause command"; exit 1; }
     echo "PASS: now playing (title, artist, album, artwork, position) and play/pause back to the sender"
   fi
+elif [[ "$MODE" == "auto-delay" ]]; then
+  # AirWave sending to a "HomePod" (its own receiver) alone: the short automatic delay. Shairport Sync (a realtime
+  # speaker) joins 7 s in: everyone moves to the normal delay and plays in step.
+  $CLI play 10.92.0.2:7000,10.91.0.2:7000 --seconds 11 --delay 2000 --auto-delay --homepod-first --stagger 7 --debug 2>&1 | tee "$WORK/play.txt" | grep -E "SESSION|END|STARTED|DELAY|Delay" || true
 elif [[ "$MODE" == "send-buffered" ]]; then
   # AirWave as the sender: Shairport Sync gets realtime ALAC, AirWave's receiver is treated as a HomePod and gets
   # buffered AAC (as AirWave now sends to HomePods and Apple TVs). Both must play in step.
@@ -110,6 +114,30 @@ else
 fi
 wait $MPID
 grep -v onsets "$WORK/rsync.txt"
+if [[ "$MODE" == "auto-delay" ]]; then
+  python3 - "$WORK/rsync.txt" "$WORK/play.txt" <<'PY4'
+import sys, re, statistics
+t, p = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+t0 = float(re.search(r"STARTED monotonic ([\d.]+) delay (\d+) ms", p).group(1))
+assert re.search(r"STARTED monotonic [\d.]+ delay 500 ms", p), "HomePod alone didn't get the short delay"
+sw = float(re.search(r"DELAY 2000 ms at monotonic ([\d.]+)", p).group(1))
+on1 = [float(x) for x in re.search(r"rx1 onsets: (.*)", t).group(1).split()]
+on2 = [float(x) for x in re.search(r"rx2 onsets: (.*)", t).group(1).split()]
+# Beeps are on whole seconds of the timeline, heard (delay + 0.25 s) later
+def lat(o): return (o - t0) % 1.0
+before = [lat(o) for o in on2 if o < sw]
+after = [lat(o) for o in on2 if o > sw + 2.6]
+print(f"HomePod alone: {len(before)} beeps, heard {statistics.median(before):.3f} s past each second (expect 0.750)")
+print(f"after a realtime speaker joined: {len(after)} beeps, {statistics.median(after) if after else float('nan'):.3f} (expect 0.250)")
+assert len(before) >= 4 and abs(statistics.median(before) - 0.75) < 0.03, "short delay not what was heard"
+assert len(after) >= 2 and abs(statistics.median(after) - 0.25) < 0.03, "delay didn't go back to normal for the mixed group"
+d = [round((x - min(on1, key=lambda y: abs(y - x))) * 1000, 1) for x in on2 if x > sw + 2.6 and on1]
+print("rx2-rx1 after join ms:", d)
+assert len(d) >= 2 and max(abs(x) for x in d) <= 15, "not in step after the group changed"
+print("PASS: automatic delay (short for HomePods alone, normal and in step once another speaker joins)")
+PY4
+  exit 0
+fi
 if [[ "$MODE" == "buffered" ]]; then
   # Buffered audio is anchored to an exact instant, so check AirWave against the true schedule
   # (Shairport Sync's pipe output can't keep time precisely in this mode, so it only has to receive audio).

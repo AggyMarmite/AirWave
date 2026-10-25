@@ -97,8 +97,48 @@ public sealed class StreamEngine : IAsyncDisposable
     internal bool WantsBuffered(SpeakerInfo info) =>
         info.SupportsBufferedAudio && (ForceBuffered || info.IsHomePod || info.IsAppleTv || info.IsMac);
 
-    /// <summary>How far ahead of the speakers' playback the audio is sent (ms). Bigger copes better with weak Wi-Fi.</summary>
-    public int DelayMs { get; set; } = 1500;
+    /// <summary>How far ahead of the speakers' playback the audio is sent (ms). Bigger copes better with weak Wi-Fi.
+    /// With <see cref="AutoDelay"/> on, this is used only for groups that include non-Apple speakers.</summary>
+    public int DelayMs { get => _manualDelayMs; set { _manualDelayMs = value; RecomputeDelay(); } }
+    private int _manualDelayMs = 1500;
+
+    /// <summary>
+    /// Pick the delay from the group: HomePods alone get a short one (they're sent buffered audio over TCP, which
+    /// recovers from Wi-Fi hiccups by itself); groups with other speakers use <see cref="DelayMs"/>.
+    /// </summary>
+    public bool AutoDelay { get => _autoDelay; set { _autoDelay = value; RecomputeDelay(); } }
+    private bool _autoDelay;
+
+    /// <summary>Delay used automatically when every speaker playing is sent buffered audio (ms; heard ≈ this + 0.35 s).</summary>
+    public const int AutoBufferedDelayMs = 500;
+
+    private volatile int _delayMs = 1500;
+    /// <summary>The delay in use now (ms).</summary>
+    public int CurrentDelayMs => _delayMs;
+    public event Action DelayChanged;
+
+    // Connecting speakers haven't been set up yet: go by what they will get
+    private bool GetsBuffered(SpeakerSession x) => x.State is SpeakerState.Idle or SpeakerState.Connecting
+        ? StyleFor(x.Info, x.Info.SupportsPtp && Ptp?.IsRunning == true && !ForceNtp) is StreamStyle.Buffered or StreamStyle.BufferedLateAnchor
+        : x.Buffered;
+
+    private void RecomputeDelay()
+    {
+        int d = _manualDelayMs;
+        if (_autoDelay)
+        {
+            var active = _sessions.Values.Where(x => x.State != SpeakerState.Failed).ToList();
+            if (active.Count > 0 && active.All(GetsBuffered))
+                d = Math.Min(AutoBufferedDelayMs, _manualDelayMs);
+        }
+        if (d == _delayMs) return;
+        int old = _delayMs;
+        _delayMs = d;
+        // Everyone moves to the new timing: buffered speakers take a new play-at time, realtime ones follow the next sync
+        foreach (var s in _sessions.Values) if (s.Buffered) s.NeedsAnchor = true;
+        if (_running) Log.Info($"Delay {old} → {d} ms");
+        DelayChanged?.Invoke();
+    }
 
     private IAudioSource _source;
     public IAudioSource Source
@@ -113,6 +153,9 @@ public sealed class StreamEngine : IAsyncDisposable
     }
 
     public bool IsStreaming => _running;
+
+    /// <summary>Clock time of the start of the timeline (tests).</summary>
+    public long StartedAtNs => _t0;
 
     // Test hook: drop this fraction of first-time audio sends to exercise the resend path (AIRWAVE_TEST_DROP=0.03)
     private static readonly double TestDrop = double.TryParse(Environment.GetEnvironmentVariable("AIRWAVE_TEST_DROP"),
@@ -164,9 +207,11 @@ public sealed class StreamEngine : IAsyncDisposable
         var s = new SpeakerSession(this, info, volume);
         s.StateChanged += x => SpeakerChanged?.Invoke(x);
         _sessions[info.Id] = s;
+        RecomputeDelay();
         EnsureRunning();
         bool ok = await s.StartAsync(ct);
         if (!ok) _sessions.TryRemove(new KeyValuePair<string, SpeakerSession>(info.Id, s));
+        RecomputeDelay();
         StopIfIdle();
         return s;
     }
@@ -174,6 +219,7 @@ public sealed class StreamEngine : IAsyncDisposable
     public async Task RemoveSpeakerAsync(string id)
     {
         if (_sessions.TryRemove(id, out var s)) await s.StopAsync();
+        RecomputeDelay();
         StopIfIdle();
     }
 
@@ -185,6 +231,7 @@ public sealed class StreamEngine : IAsyncDisposable
     internal void OnSpeakerDropped(SpeakerSession s)
     {
         _sessions.TryRemove(new KeyValuePair<string, SpeakerSession>(s.Info.Id, s));
+        RecomputeDelay();
         StopIfIdle();
     }
 
@@ -283,7 +330,7 @@ public sealed class StreamEngine : IAsyncDisposable
                 if (s.Style == StreamStyle.RealtimeJustInTime)
                 {
                     // Held back and sent as each packet falls due (below)
-                    long dueNs = _t0 + PacketNs(_packetIndex) + DelayMs * 1_000_000L;
+                    long dueNs = _t0 + PacketNs(_packetIndex) + _delayMs * 1_000_000L;
                     lock (s.JitQueue) s.JitQueue.Enqueue(((byte[])header.Clone(), payload.AsSpan(0, len).ToArray(), seq, rtp, dueNs));
                     continue;
                 }
@@ -388,7 +435,7 @@ public sealed class StreamEngine : IAsyncDisposable
             uint aRtp = (uint)(_rtpBase + sample);
             // Realtime speakers add the stream's 11025-sample (250 ms) latency to the sync packets' timing; buffered
             // anchors are exact, so add the same here and both kinds play together
-            long aNs = _t0 + PacketNs(packetIndex) + (DelayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L + RealtimeLatencyNs;
+            long aNs = _t0 + PacketNs(packetIndex) + (_delayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L + RealtimeLatencyNs;
             if (!s.TryAnchor(aRtp, aNs)) continue; // speaker's clock not followed yet: next time round
             s.NeedsAnchor = false;
             s.MarkStreaming();
@@ -429,7 +476,7 @@ public sealed class StreamEngine : IAsyncDisposable
         if (s.ControlEndPoint == null) return;
         long now = MonoClock.NowNs;
         if (!TryRemoteTime(s, now, out long remoteNow, out ulong timelineClock)) return;
-        long delayNs = (DelayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L;
+        long delayNs = (_delayMs + GetSpeakerOffset(s.Info.Id)) * 1_000_000L;
         // The sample that should be playing right now
         long elapsed = now - _t0 - delayNs;
         uint curRtp = (uint)(_rtpBase + (elapsed * Sr / 1_000_000_000L));

@@ -60,11 +60,13 @@ public sealed class AppController : Observable, IAsyncDisposable
         {
             ClientName = Environment.MachineName,
             DelayMs = Math.Clamp(Settings.DelayMs, 1000, 3000),
+            AutoDelay = Settings.AutoDelay,
             ForceNtp = Settings.ForceNtp,
         };
         _capture = new LoopbackSource { DeviceId = Settings.CaptureDeviceId };
         _engine.Source = _capture;
         _engine.SpeakerChanged += s => _ui.InvokeAsync(() => OnSessionChanged(s));
+        _engine.DelayChanged += () => _ui.InvokeAsync(() => { Raise(nameof(DelayText)); UpdateStatusLine(); });
 
         _browser.SpeakerFound += s => _ui.InvokeAsync(() => OnFound(s));
         _browser.SpeakerUpdated += s => _ui.InvokeAsync(() => OnFound(s));
@@ -172,6 +174,24 @@ public sealed class AppController : Observable, IAsyncDisposable
     }
 
     public string DelayText => $"{Settings.DelayMs / 1000.0:0.0} s";
+
+    /// <summary>Short delay chosen automatically when only HomePods are playing.</summary>
+    public bool AutoDelay
+    {
+        get => Settings.AutoDelay;
+        set
+        {
+            if (Settings.AutoDelay == value) return;
+            Settings.AutoDelay = value;
+            _engine.AutoDelay = value;
+            Settings.Save();
+            Raise();
+            UpdateStatusLine();
+        }
+    }
+
+    // What the listener hears: the delay, plus the speakers' own 0.25 s and the capture cushion
+    private string HeardDelayText => $"{(_engine.CurrentDelayMs + 350) / 1000.0:0.0} s delay";
 
     public bool ReconnectOnLaunch
     {
@@ -440,7 +460,7 @@ public sealed class AppController : Observable, IAsyncDisposable
         int playing = Speakers.Count(s => s.IsPlaying);
         int connecting = Speakers.Count(s => s.IsConnecting);
         if (playing > 0)
-            StatusLine = $"Playing on {playing} speaker{(playing == 1 ? "" : "s")}" + (connecting > 0 ? $" · {connecting} connecting" : "") + $" · {Settings.DelayMs / 1000.0:0.0} s delay";
+            StatusLine = $"Playing on {playing} speaker{(playing == 1 ? "" : "s")}" + (connecting > 0 ? $" · {connecting} connecting" : "") + " · " + HeardDelayText;
         else if (connecting > 0)
             StatusLine = "Connecting…";
         else if (Speakers.Count == 0)
@@ -456,6 +476,8 @@ public sealed class AppController : Observable, IAsyncDisposable
     private void ApplyPcMute()
     {
         if (!Settings.MutePcWhileStreaming || _pcWasMuted != null) return;
+        // Capturing one particular output device (or on older Windows): muting it would silence what's sent too
+        if (!_capture.CapturesApps) { Log.Info("Not muting this PC: the sound is captured from the output device, which muting would silence"); return; }
         _mutedDeviceId = Settings.CaptureDeviceId;
         _pcWasMuted = WindowsAudio.SetMute(_mutedDeviceId, true);
     }

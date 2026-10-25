@@ -32,6 +32,9 @@ public sealed class LoopbackSource : CapturedSource
     public bool PreferAppCapture { get; set; } = true;
     private bool _appCaptureFailed, _appStarted;
 
+    /// <summary>Whether capture will be of the apps directly, so muting the PC leaves it alone.</summary>
+    public bool CapturesApps => PreferAppCapture && string.IsNullOrEmpty(DeviceId) && ProcessLoopback.Supported && !_appCaptureFailed;
+
     /// <summary>True while capturing apps directly (unaffected by the PC's mute).</summary>
     public bool CapturingApps { get; private set; }
 

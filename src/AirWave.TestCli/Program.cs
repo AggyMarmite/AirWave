@@ -95,6 +95,8 @@ if (args[0] == "play")
     // HomePodsKeepTime off: the stand-in "HomePod" here is AirWave's own receiver, which follows a clock but never keeps one
     await using var engine = new StreamEngine(enablePtp: !args.Contains("--ntp")) { ClientName = "AirWave Test", ForceNtp = args.Contains("--ntp"), ForceBuffered = args.Contains("--buffered"), HomePodsKeepTime = false };
     if (args.Contains("--delay")) engine.DelayMs = int.Parse(args[Array.IndexOf(args, "--delay") + 1]);
+    engine.AutoDelay = args.Contains("--auto-delay");
+    engine.DelayChanged += () => Console.WriteLine($"DELAY {engine.CurrentDelayMs} ms at monotonic {System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency:F6}");
     engine.Source = pcm != null ? new RawPcmSource(pcm) : new ToneSource();
     int stagger = args.Contains("--stagger") ? int.Parse(args[Array.IndexOf(args, "--stagger") + 1]) : 0;
     var tasks = new List<Task<SpeakerSession>>();
@@ -105,8 +107,15 @@ if (args[0] == "play")
         var info = new SpeakerInfo { Id = t, Name = t, Port = ep.Port, Features = (1UL << 9) | (1UL << 48) | (1UL << 40) | (args.Contains("--ntp") ? 0 : 1UL << 41) };
         // --homepod2: treat the second speaker as a HomePod (gets buffered AAC, like from an iPhone)
         if (args.Contains("--homepod2") && tasks.Count == 1) info.Model = "AudioAccessory5,1";
+        // --homepod-first: treat the first speaker as a HomePod
+        if (args.Contains("--homepod-first") && tasks.Count == 0) info.Model = "AudioAccessory5,1";
         info.Addresses.Add(ep.Address);
         tasks.Add(engine.AddSpeakerAsync(info, 0.8));
+        if (tasks.Count == 1)
+        {
+            await Task.Delay(300);
+            Console.WriteLine($"STARTED monotonic {(engine.StartedAtNs - AirWave.Core.Timing.MonoClock.NowNs) / 1e9 + System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency:F6} delay {engine.CurrentDelayMs} ms");
+        }
     }
     var sessions = await Task.WhenAll(tasks);
     foreach (var s in sessions) Console.WriteLine($"SESSION {s.Info.Name}: {s.State} {s.ProblemText}");

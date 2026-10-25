@@ -42,6 +42,8 @@ public static class SpeakerLab
         bool oldYield = engine.Ptp?.Yield ?? false;
         bool oldHomePods = engine.HomePodsKeepTime;
         engine.HomePodsKeepTime = false; // each test says who keeps time
+        bool oldAuto = engine.AutoDelay;
+        engine.AutoDelay = false;        // every test at the same delay
         var oldLevel = Log.MinLevel;
         Log.MinLevel = LogLevel.Debug;
         Log.Info($"Speaker test on {speaker.Name} ({speaker.Model}, {speaker.PreferredAddress}) starting");
@@ -88,6 +90,7 @@ public static class SpeakerLab
             await engine.RemoveAllAsync();
             engine.StyleOverride = oldOverride;
             engine.HomePodsKeepTime = oldHomePods;
+            engine.AutoDelay = oldAuto;
             if (engine.Ptp != null) engine.Ptp.Yield = oldYield;
             engine.Source = oldSource;
             Log.MinLevel = oldLevel;

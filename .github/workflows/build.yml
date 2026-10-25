@@ -44,6 +44,7 @@ jobs:
           & $cli capture-test 2>&1 | Tee-Object -FilePath "$dir\capture-test.txt"
           $code = $LASTEXITCODE
           $player.Stop()
+          Get-Content "$dir\capture-test.txt" | Where-Object { $_ -match 'CAPTURE|PASS|FAIL' } | ForEach-Object { "::notice::$_" }
           if ($code -ne 0) { throw "Capture while muted failed" }
 
       - name: AirPlay to this PC through Windows audio

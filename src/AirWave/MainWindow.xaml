@@ -475,10 +475,16 @@
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding MutePcWhileStreaming, Mode=TwoWay}">
                                 <StackPanel>
                                     <TextBlock Text="Mute this PC while streaming" FontWeight="SemiBold"/>
-                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" Text="Stops the sound coming out of the PC as well as the speakers. Your PC's volume comes back when you stop."/>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" Text="Silences this PC's own speakers while your AirPlay speakers keep playing. The PC's sound comes back when you stop."/>
                                 </StackPanel>
                             </CheckBox>
                             <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
+                            <CheckBox IsChecked="{Binding AutoDelay}" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Shortest delay for HomePods" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap" Text="When only HomePods are playing, they play under a second behind the PC. With other speakers in the group, the delay below is used."/>
+                                </StackPanel>
+                            </CheckBox>
                             <Grid>
                                 <TextBlock Text="Delay" FontWeight="SemiBold"/>
                                 <TextBlock Text="{Binding DelayText}" Style="{StaticResource Muted}" HorizontalAlignment="Right"/>

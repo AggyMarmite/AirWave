@@ -8,6 +8,7 @@ public sealed class AppSettings
     public string CaptureDeviceId { get; set; }          // null = follow Windows default output
     public bool MutePcWhileStreaming { get; set; } = true;
     public int DelayMs { get; set; } = 2000;
+    public bool AutoDelay { get; set; } = true;         // short delay when only HomePods are playing
     public double MasterVolume { get; set; } = 0.6;
     public Dictionary<string, double> SpeakerVolumes { get; set; } = new();
     public Dictionary<string, int> SpeakerOffsets { get; set; } = new(); // timing nudge, ms (+ = later)
