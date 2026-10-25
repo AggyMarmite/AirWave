@@ -13,6 +13,7 @@ public sealed class LoopbackSource : CapturedSource
 {
     private const int AUDCLNT_SHAREMODE_SHARED = 0;
     private const int AUDCLNT_STREAMFLAGS_LOOPBACK = 0x00020000;
+    private const int AUDCLNT_STREAMFLAGS_EVENTCALLBACK = 0x00040000;
     private const int AUDCLNT_BUFFERFLAGS_SILENT = 0x2;
     private const int CLSCTX_ALL = 23;
     private static readonly Guid KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = new("00000003-0000-0010-8000-00aa00389b71");
@@ -23,6 +24,16 @@ public sealed class LoopbackSource : CapturedSource
     public string DeviceId { get; set; }  // null = follow the default output
     public string CurrentDeviceName { get; private set; }
     public string LastError { get; private set; }
+
+    /// <summary>
+    /// Capture apps' sound before the device's volume and mute (so muting the PC doesn't silence the speakers), when
+    /// following the default output on Windows 10 2004 or later. Falls back to capturing the device.
+    /// </summary>
+    public bool PreferAppCapture { get; set; } = true;
+    private bool _appCaptureFailed, _appStarted;
+
+    /// <summary>True while capturing apps directly (unaffected by the PC's mute).</summary>
+    public bool CapturingApps { get; private set; }
 
     public override void Start()
     {
@@ -66,6 +77,101 @@ public sealed class LoopbackSource : CapturedSource
     }
 
     private void CaptureSession()
+    {
+        if (PreferAppCapture && string.IsNullOrEmpty(DeviceId) && ProcessLoopback.Supported && !_appCaptureFailed)
+        {
+            _appStarted = false;
+            try { AppCaptureSession(); return; }
+            catch (Exception) when (_appStarted)
+            {
+                CapturingApps = false;
+                throw; // was working: retried after a moment
+            }
+            catch (Exception ex)
+            {
+                if (!_run) return;
+                _appCaptureFailed = true; // couldn't start at all: device capture from now on
+                CapturingApps = false;
+                Log.Warn($"Capturing apps directly isn't available ({ex.Message}); capturing the output device instead");
+            }
+        }
+        DeviceCaptureSession();
+    }
+
+    /// <summary>Process loopback: every app but AirWave, 44.1 kHz 16-bit stereo, unaffected by the device's mute.</summary>
+    private void AppCaptureSession()
+    {
+        IAudioClient client = null;
+        IAudioCaptureClient capture = null;
+        IntPtr fmtPtr = IntPtr.Zero;
+        using var ready = new AutoResetEvent(false);
+        bool started = false;
+        try
+        {
+            client = ProcessLoopback.Activate();
+            const int rate = 44100, channels = 2, bits = 16;
+            var fmt = new WaveFormatEx
+            {
+                wFormatTag = 1, nChannels = channels, nSamplesPerSec = rate, wBitsPerSample = bits,
+                nBlockAlign = channels * bits / 8, nAvgBytesPerSec = rate * channels * bits / 8, cbSize = 0,
+            };
+            fmtPtr = Marshal.AllocCoTaskMem(Marshal.SizeOf<WaveFormatEx>());
+            Marshal.StructureToPtr(fmt, fmtPtr, false);
+            Marshal.ThrowExceptionForHR(client.Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                1_000_000, 0, fmtPtr, IntPtr.Zero));
+            Marshal.ThrowExceptionForHR(client.SetEventHandle(ready.SafeWaitHandle.DangerousGetHandle()));
+            var ciid = CoreAudioIds.IID_IAudioCaptureClient;
+            Marshal.ThrowExceptionForHR(client.GetService(ref ciid, out var co));
+            capture = (IAudioCaptureClient)co;
+            Resampler.Configure(rate);
+            Marshal.ThrowExceptionForHR(client.Start());
+            started = _appStarted = true;
+            LastError = null;
+            CurrentDeviceName = "All apps";
+            CapturingApps = true;
+            Log.Info("Capturing all apps' sound (unaffected by muting this PC)");
+
+            var floats = new float[48000 * 8];
+            long lastData = Environment.TickCount64;
+            while (_run)
+            {
+                ready.WaitOne(10);
+                int hr;
+                while ((hr = capture.GetNextPacketSize(out uint packet)) == 0 && packet > 0)
+                {
+                    Marshal.ThrowExceptionForHR(capture.GetBuffer(out IntPtr data, out uint frames, out uint flags, out _, out _));
+                    int n = (int)frames * channels;
+                    if (n > floats.Length) floats = new float[n];
+                    if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) Array.Clear(floats, 0, n);
+                    else Convert(data, n, false, bits, floats);
+                    capture.ReleaseBuffer(frames);
+                    Resampler.Process(floats.AsSpan(0, n), channels, Ring);
+                    lastData = Environment.TickCount64;
+                }
+                if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+                long now = Environment.TickCount64;
+                if (now - lastData > 80)
+                {
+                    int sn = Math.Min((int)((now - lastData) * rate / 1000) * channels, floats.Length);
+                    if (sn > 0)
+                    {
+                        Array.Clear(floats, 0, sn);
+                        Resampler.Process(floats.AsSpan(0, sn), channels, Ring);
+                        lastData = now;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (started) try { client.Stop(); } catch { }
+            if (fmtPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(fmtPtr);
+            if (capture != null) Marshal.ReleaseComObject(capture);
+            if (client != null) Marshal.ReleaseComObject(client);
+        }
+    }
+
+    private void DeviceCaptureSession()
     {
         var dev = WindowsAudio.GetDevice(DeviceId);
         IAudioClient client = null;

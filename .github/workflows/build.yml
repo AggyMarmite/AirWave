@@ -32,6 +32,20 @@ jobs:
       - name: Virtual sound card (for the playback test)
         uses: LABSN/sound-ci-helpers@v1
 
+      - name: Muting this PC doesn't silence the speakers
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\selftest"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          python -c "import wave,math,struct; w=wave.open(r'$dir\tone.wav','wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100); w.writeframes(b''.join(struct.pack('<hh',v,v) for v in (int(12000*math.sin(2*math.pi*440*i/44100)) for i in range(44100*20)))); w.close()"
+          $player = New-Object System.Media.SoundPlayer "$dir\tone.wav"
+          $player.PlayLooping()
+          $cli = "src\AirWave.TestCli\bin\Release\net8.0\AirWave.TestCli.exe"
+          & $cli capture-test 2>&1 | Tee-Object -FilePath "$dir\capture-test.txt"
+          $code = $LASTEXITCODE
+          $player.Stop()
+          if ($code -ne 0) { throw "Capture while muted failed" }
+
       - name: AirPlay to this PC through Windows audio
         shell: pwsh
         run: |

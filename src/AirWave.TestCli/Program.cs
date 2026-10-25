@@ -14,6 +14,7 @@ if (args.Length > 0 && args[0] == "receive") { Environment.ExitCode = await Rece
 if (args.Length > 0 && args[0] == "send-buffered") { Environment.ExitCode = await SendBufferedCommand.Run(args); return; }
 if (args.Length > 0 && args[0] == "mock-tv") { Environment.ExitCode = await MockTvCommand.Run(args); return; }
 if (args.Length > 0 && args[0] == "mirror-test") { Environment.ExitCode = await MirrorTestCommand.Run(args); return; }
+if (args.Length > 0 && args[0] == "capture-test" && OperatingSystem.IsWindows()) { Environment.ExitCode = CaptureTestCommand.Run(args); return; }
 if (args.Length > 0 && args[0] == "unit") { Environment.ExitCode = UnitChecks.Run(); return; }
 
 if (args.Length == 0 || args[0] == "discover")
